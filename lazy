@@ -214,6 +214,36 @@ def cmd_push(args, conn):
     else:
         print("Nothing to push! You are already free.")
 
+def cmd_bump(args, conn):
+    """Handles 'lazy bump'. Moves a task to +1 day."""
+    task_id = args.id
+    
+    if task_id is None:
+        # Default to the first pending task on "today's" list
+        tasks = get_tasks('today', conn=conn)
+        if not tasks:
+            print("Nothing to bump!")
+            return
+        task_id = tasks[0]['id']
+        print(f"Bumping top task: [{task_id}] {tasks[0]['description']}")
+
+    task = get_task(task_id, conn=conn)
+    if task:
+        current_due = date.fromisoformat(task['due_date'])
+        today = date.today()
+        
+        # If overdue or today, move to tomorrow.
+        # If future, move to +1 day from current due.
+        if current_due <= today:
+            new_date = today + timedelta(days=1)
+        else:
+            new_date = current_due + timedelta(days=1)
+            
+        move_task(task_id, new_date, conn=conn)
+        print(f"Bumped [{task_id}] to {new_date}.")
+    else:
+        print(f"Task [{task_id}] not found.")
+
 def cmd_triage(args, conn):
     """
     Handles 'lazy triage'.
@@ -322,6 +352,11 @@ Date Formats:
     parser_push = subparsers.add_parser('p', aliases=['push'], help='Push all today\'s tasks to tomorrow')
     parser_push.set_defaults(func=cmd_push)
 
+    # Subparser for 'bump' (b)
+    parser_bump = subparsers.add_parser('b', aliases=['bump'], help='Bump a task to tomorrow (or +1 day)')
+    parser_bump.add_argument('id', type=int, nargs='?', help='Task ID (optional, defaults to top task)')
+    parser_bump.set_defaults(func=cmd_bump)
+
     # Subparser for 'triage' (t)
     parser_triage = subparsers.add_parser('t', aliases=['triage'], help='Interactively triage today\'s tasks')
     parser_triage.set_defaults(func=cmd_triage)
@@ -350,6 +385,7 @@ Date Formats:
         'd': 'id', 'done': 'id',
         'rm': 'id', 'del': 'id', 'delete': 'id',
         'm': 'id', 'mv': 'id', 'move': 'id', 'reschedule': 'id',
+        'b': 'id', 'bump': 'id',
         
         # 'add' and 'help' are special, we don't implicit-add them
         'a': 'special', 'add': 'special', 'new': 'special',
