@@ -105,8 +105,10 @@ Because specific dates are stressful.
 ### Standard Offsets
 *   `today`, `tmw`, `yesterday`
 *   `+1` (1 day), `+1w` (1 week), `+1m` (1 month)
-*   `mon`, `tue`, `wed`... (Finds the next occurrence)
-*   `eow` (End of Week / Fri), `eom` (End of Month), `eoy` (End of Year)
+*   **Milestones:** `eow` (End of Week / Fri), `eom` (End of Month), `eoy` (End of Year).
+*   **Days:** `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
+*   **Months:** `jan`, `feb`, `march`... (Defaults to 1st of next occurrence).
+*   **Next:** `next week`, `next month`, `next year`.
 
 ---
 

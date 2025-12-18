@@ -163,6 +163,43 @@ def parse_date(date_str):
     if lower_str == 'next year':
         return date(today.year + 1, 1, 1)
         
+    # Month names (jan, january, etc.)
+    # Map names to numbers
+    month_map = {
+        'jan': 1, 'january': 1,
+        'feb': 2, 'february': 2,
+        'mar': 3, 'march': 3,
+        'apr': 4, 'april': 4,
+        'may': 5,
+        'jun': 6, 'june': 6,
+        'jul': 7, 'july': 7,
+        'aug': 8, 'august': 8,
+        'sep': 9, 'september': 9,
+        'oct': 10, 'october': 10,
+        'nov': 11, 'november': 11,
+        'dec': 12, 'december': 12
+    }
+    
+    if lower_str in month_map:
+        target_month = month_map[lower_str]
+        target_year = today.year
+        
+        # If the target month is earlier than or same as current, assume next year
+        # (e.g. In Dec, "Jan" means Jan next year. In Jan, "Jan" means... next year? or today?)
+        # Let's say if it's strictly earlier, next year.
+        # If it's current month... maybe they mean "sometime this month"?
+        # But defaulting to 1st of this month (past) is weird.
+        # Let's stick to "Next occurrence of 1st of Month".
+        if target_month < today.month:
+            target_year += 1
+        elif target_month == today.month:
+            # If today is Jan 5, and I say "Jan", do I mean Jan 2026?
+            # Or do I mean "This month"?
+            # Let's assume next year to be safe (future).
+            target_year += 1
+            
+        return date(target_year, target_month, 1)
+        
     if lower_str == 'eow': # End of week -> Next Friday
         current = today.weekday()
         days_until_fri = (4 - current)
