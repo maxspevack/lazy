@@ -25,19 +25,29 @@ alias lazy="~/gemini/lazy/lazy"
 
 ### 1. Dump Your Brain
 Don't worry about dates. If you don't specify one, it defaults to **Today**.
-You don't even need to type "add" or "a". Just type the task.
+You don't even need to type "add" or "a". Just type the task. No quotes needed.
 
 ```bash
-lazy "Buy Milk"
-lazy "Call Mom" tmw
-lazy "Fix the roof" eventually
+lazy Buy Milk
+lazy Call Mom tmw
+lazy Fix the roof eventually
 ```
 
-**Smart Parsing:** Even if your task starts with a command word, `lazy` figures it out.
+**The Killer Feature (Smart Parsing):**
+You can mix command words, multi-word descriptions, and multi-word dates. `lazy` figures it out.
+
 ```bash
-lazy mv boxes to attic   # Adds task: "mv boxes to attic"
-lazy ls my files         # Adds task: "ls my files"
+# "mv" is a command? No, here it's part of the task!
+# "this weekend" is a date? Yes!
+lazy mv boxes to the basement this weekend
 ```
+*Result:* Adds task **"mv boxes to the basement"** due **Next Saturday**.
+
+```bash
+# "ls" is a command? No!
+lazy ls my files next mon
+```
+*Result:* Adds task **"ls my files"** due **Next Monday**.
 
 ### 2. Check the Damage
 Run `lazy` to see *only* what is due today (or overdue). Ignore the future. The future is a problem for Future You.
