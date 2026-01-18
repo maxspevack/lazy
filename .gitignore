@@ -1,0 +1,4 @@
+# Lazy CLI ignores
+lazy.db
+__pycache__/
+*.pyc
