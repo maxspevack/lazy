@@ -64,7 +64,14 @@ lazy push
 *Effect:* Instantly reschedules all of today's pending tasks to tomorrow. 
 *Feeling:* Instant relief.
 
-### 4. Do ONE Thing
+### 4. The "Not Today" Button
+Just one annoying task you want to ignore? Bump it.
+```bash
+lazy bump <id>
+```
+*(Alias: `lazy b`)*. Moves that specific task to **Tomorrow**. If you don't provide an ID, it bumps the first task on the list.
+
+### 5. Do ONE Thing
 If you must work, work on the single most urgent item.
 ```bash
 lazy focus
@@ -113,6 +120,7 @@ Because specific dates are stressful.
 | `lazy d <id>` | | **Done:** Marks task `<id>` as complete. Prints praise. |
 | `lazy rm <id>` | `del` | **Delete:** Permanently removes task `<id>`. |
 | `lazy p` | `push` | **Push:** Moves all today's tasks to tomorrow. |
+| `lazy b <id>` | `bump` | **Bump:** Moves a single task to tomorrow. |
 | `lazy 1` | `focus` | **One Thing:** Shows the single most urgent task. |
 | `lazy t` | `triage` | **Triage:** Interactive mode to process today's tasks. |
 | `lazy m <id> <date>` | `mv` | **Reschedule:** Move a specific task. |
