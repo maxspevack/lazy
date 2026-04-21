@@ -9,7 +9,7 @@ the application logic by invoking the database and utility modules.
 Philosophy: "Why do today what you can push to tomorrow?"
 """
 
-__version__ = "v2025.12.18"
+__version__ = "v2026.04.21"
 
 import argparse
 import sys

@@ -1,3 +1,21 @@
+# Lazy CLI Release Notes: v2026.04.21
+
+Whatever. Here’s the new stuff. It’s mostly for the robots.
+
+### The "Agentic Awakening" (Feature Updates)
+
+*   **Model Context Protocol (MCP) Bridge:** We built an entire sidecar server just so Matthew and his fleet of specialists can look at your todo list. Now they can nag you autonomously. 
+*   **The "Golden Aura" Refactor:** Burney did a "vibe audit" and decided the previous messages weren't "Based" enough. We pruned the list to 120 items of Cyber-Baroque excellence. 🏺
+*   **Protocol Hardening:** Gafton found some missing fields in our handshake. We fixed them. Now the protocol is as rigid as his standards.
+*   **Tool Expansion:** Added `lazy_get_messages` to the MCP so the agents can study our brand of high-status inaction.
+
+### Refinements (Internal Noise)
+
+*   **Logic Sync:** The MCP server now returns the same whimsical praises as the CLI. Consistency achieved with zero additional effort.
+*   **JSON-RPC Alignment:** Handled the `notifications/initialized` event. It’s compliant. Don’t ask.
+
+Now go back to doing nothing.
+
 # Lazy CLI Release Notes: v2025.12.18
 
 Ugh. Fine. Here's a list of things that *had* to be done because apparently, being lazy requires a lot of work.
