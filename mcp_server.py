@@ -24,86 +24,85 @@ def main():
                 break
             
             request = json.loads(line)
+            method = request.get("method")
+            req_id = request.get("id")
             
+            # MCP specification: Notifications do not have an ID and MUST NOT be responded to.
+            if req_id is None:
+                continue
+
+            response_result = None
+            response_error = None
+
             # Simple stdio MCP protocol handling
-            if request.get("method") == "initialize":
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "lazy-mcp",
-                            "version": "1.0.0"
+            if method == "initialize":
+                response_result = {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {
+                            "list": True
                         }
+                    },
+                    "serverInfo": {
+                        "name": "lazy-mcp",
+                        "version": "1.0.0"
                     }
                 }
-            elif request.get("method") == "notifications/initialized":
-                # MCP specification: This is a notification sent by the client
-                # after receiving the initialize response. No response required.
-                continue
-            elif request.get("method") == "tools/list":
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": {
-                        "tools": [
-                            {
-                                "name": "lazy_add",
-                                "description": "Add a new task to the lazy todo list. Use natural language for dates (e.g., 'tmw', 'next fri', 'soon').",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "description": {"type": "string", "description": "The task description"},
-                                        "due_date": {"type": "string", "description": "Optional due date (default: today)"}
-                                    },
-                                    "required": ["description"]
-                                }
-                            },
-                            {
-                                "name": "lazy_list",
-                                "description": "List pending tasks. Defaults to today's and overdue tasks.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "mode": {"type": "string", "enum": ["today", "all"], "description": "Filter mode"}
-                                    }
-                                }
-                            },
-                            {
-                                "name": "lazy_done",
-                                "description": "Mark a task as complete by its ID.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "id": {"type": "integer", "description": "The task ID"}
-                                    },
-                                    "required": ["id"]
-                                }
-                            },
-                            {
-                                "name": "lazy_push",
-                                "description": "The 'Panic Button'. Pushes all today's tasks to tomorrow.",
-                                "inputSchema": {"type": "object", "properties": {}}
-                            },
-                            {
-                                "name": "lazy_get_messages",
-                                "description": "Retrieve the list of completion and empty-state messages from the LulzCorp brand config.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "category": {"type": "string", "enum": ["completion", "empty"], "description": "Message category"}
-                                    },
-                                    "required": ["category"]
+            elif method == "tools/list":
+                response_result = {
+                    "tools": [
+                        {
+                            "name": "lazy_add",
+                            "description": "Add a new task to the lazy todo list. Use natural language for dates (e.g., 'tmw', 'next fri', 'soon').",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "description": {"type": "string", "description": "The task description"},
+                                    "due_date": {"type": "string", "description": "Optional due date (default: today)"}
+                                },
+                                "required": ["description"]
+                            }
+                        },
+                        {
+                            "name": "lazy_list",
+                            "description": "List pending tasks. Defaults to today's and overdue tasks.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "mode": {"type": "string", "enum": ["today", "all"], "description": "Filter mode"}
                                 }
                             }
-                        ]
-                    }
+                        },
+                        {
+                            "name": "lazy_done",
+                            "description": "Mark a task as complete by its ID.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "integer", "description": "The task ID"}
+                                },
+                                "required": ["id"]
+                            }
+                        },
+                        {
+                            "name": "lazy_push",
+                            "description": "The 'Panic Button'. Pushes all today's tasks to tomorrow.",
+                            "inputSchema": {"type": "object", "properties": {}}
+                        },
+                        {
+                            "name": "lazy_get_messages",
+                            "description": "Retrieve the list of completion and empty-state messages from the LulzCorp brand config.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "category": {"type": "string", "enum": ["completion", "empty"], "description": "Message category"}
+                                },
+                                    "required": ["category"]
+                            }
+                        }
+                    ]
                 }
-            elif request.get("method") == "tools/call":
+            elif method == "tools/call":
                 params = request.get("params", {})
                 tool_name = params.get("name")
                 arguments = params.get("arguments", {})
@@ -158,18 +157,16 @@ def main():
                         result = {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}]}
                 finally:
                     conn.close()
-                
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": result
-                }
+                response_result = result
             else:
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "error": {"code": -32601, "message": "Method not found"}
-                }
+                response_error = {"code": -32601, "message": f"Method not found: {method}"}
+            
+            # Send response if not a notification
+            response = {"jsonrpc": "2.0", "id": req_id}
+            if response_result is not None:
+                response["result"] = response_result
+            elif response_error is not None:
+                response["error"] = response_error
             
             sys.stdout.write(json.dumps(response) + "\n")
             sys.stdout.flush()
@@ -178,7 +175,7 @@ def main():
             # MCP errors should be returned as JSON-RPC error objects
             err_response = {
                 "jsonrpc": "2.0",
-                "id": None,
+                "id": None, # This is technically incorrect for a request, but safe for a crash
                 "error": {"code": -32603, "message": str(e)}
             }
             sys.stdout.write(json.dumps(err_response) + "\n")
