@@ -99,6 +99,28 @@ lazy view <id>
 
 ---
 
+## 🤖 The Robot Workforce (MCP Server)
+
+For those who are too lazy even for a CLI, `lazy` includes a **Model Context Protocol (MCP)** server. This allows AI agents (like Gemini) to manage your backlog for you.
+
+### Tools for the Fleet
+The MCP server (`mcp_server.py`) exposes the following capabilities to agents:
+*   `lazy_add`: Add a task with natural language date parsing.
+*   `lazy_list`: Retrieve pending tasks (today or all).
+*   `lazy_done`: Mark a task as complete and dispense brand-aligned praise.
+*   `lazy_rename`: surgically update a task's description.
+*   **NEW** `lazy_move`: Reschedule a task to a new date using natural language.
+*   `lazy_push`: The global panic button.
+*   `lazy_get_messages`: Audit the LulzCorp brand's reservoir of whimsy.
+
+### Running the Server
+The server operates over stdio and is designed for integration with AI platforms.
+```bash
+python3 ~/gemini/lazy/mcp_server.py
+```
+
+---
+
 ## 📅 The "Vibes-Based" Time System
 
 `lazy` understands that "Next Friday" is a feeling, not a coordinate.
@@ -150,8 +172,19 @@ Because specific dates are stressful.
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Systems & Configuration
 
+### Data Architecture
+`lazy` utilizes a **SQLite** backend (`lazy.db`) to ensure your tasks survive a reboot, even if your motivation doesn't. 
+Schema: `id` (PK), `description` (TEXT), `due_date` (DATE), `status` (pending/done), `created_at` (TIMESTAMP).
+
+### Verification
+A full regression suite is available. You built it—test it.
+```bash
+python3 ~/gemini/lazy/test_lazy.py
+```
+
+### Configuration
 `lazy/config.json` allows you to customize the experience.
 
 ```json
