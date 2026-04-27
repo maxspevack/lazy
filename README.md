@@ -78,6 +78,25 @@ lazy focus
 ```
 *(Alias: `lazy 1`)*. This clears the screen and shows you exactly **one** task. Do it, or don't.
 
+### 6. Revisionist History (Editing the Past)
+*New in v2026.04.27*
+
+Sometimes the way we phrased a task was... overly ambitious. Or perhaps we just want to change the aesthetic of our failures. 
+
+**Rename (The "I Misspoke" Tool):**
+If a task description no longer vibes with your current state of inertia, change it.
+```bash
+lazy rename <id> New and slightly less stressful description
+```
+*(Aliases: `rn`, `re`, `edit`)*. 
+
+**View (The "Abyss Gazer"):**
+Sometimes looking at the whole list is too much of a burden on the soul. You can now isolate a single task to study it in its lonely, uncompleted glory.
+```bash
+lazy view <id>
+```
+*(Aliases: `v`, `show`)*. It displays just that task. No distractions. Just you and your choices.
+
 ---
 
 ## 📅 The "Vibes-Based" Time System
@@ -126,6 +145,8 @@ Because specific dates are stressful.
 | `lazy 1` | `focus` | **One Thing:** Shows the single most urgent task. |
 | `lazy t` | `triage` | **Triage:** Interactive mode to process today's tasks. |
 | `lazy m <id> <date>` | `mv` | **Reschedule:** Move a specific task. |
+| `lazy rn <id> <text>` | `re`, `edit` | **Rename:** Change the description of an existing task. |
+| `lazy v <id>` | `show` | **View:** Display the details of a single, specific task. |
 
 ---
 
