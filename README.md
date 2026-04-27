@@ -1,200 +1,103 @@
-# Lazy 🦥
-**The Task Manager for People Who Hate Task Managers**
+# Lazy 🦥: The High-Frequency Altar of Procrastination
 
 > "Why do today what you can push to tomorrow?"
 
-`lazy` is a zero-friction, CLI-based task manager built on a single core philosophy: **Guilt is useless.**
+`lazy` is not a task manager. It is a **Vibe Engineering** platform for the professional procrastinator. We recognize that guilt is a friction coefficient that we simply cannot afford. `lazy` allows you to aggressively defer, surgically ignore, and occasionally complete tasks with the detached grace of a hermit crab in vestments.
 
-Most todo apps are designed to make you feel bad about your growing backlog. `lazy` is designed to help you aggressively defer, ignore, and eventually (maybe) complete tasks, while telling you that you're doing a great job.
+## 🤖 The Elite Interface: AI-First (MCP)
 
-## 🚀 Getting Started
+The truly high-status individual does not type commands. They delegate to the **Robot Workforce**. `lazy` is natively integrated with the **Model Context Protocol (MCP)**, allowing Gemini and other LulzCorp agents to manage your existential dread for you. This is the primary interface for the modern procrastinator.
 
-You have to type very little. That is the point.
+### Tools for the Robot Workforce:
+- **`lazy_add`**: Manifest a task from the void using natural language.
+- **`lazy_list`**: The **Abyss Gazer**. Audit your entire backlog or just today's failures.
+- **`lazy_done`**: Mark a task complete and receive brand-aligned validation.
+- **`lazy_rename`**: **Revisionist History**. surgically update a task's description.
+- **`lazy_move`**: Reschedule the inevitable with natural language grace.
+- **`lazy_push`**: The **Global Panic Button**. Instantly push all today's burdens to tomorrow.
+- **`lazy_get_messages`**: Audit the reservoir of LulzCorp whimsy.
 
-This tool is a spiritual successor to an ancient legend: **LazyMeter**. Back in 2011, LazyMeter was the only to-do list other than pen and paper that truly understood the procrastinator's soul. It vanished, lost to the sands of time (and probably someone being too lazy to renew the domain). Until now. Thanks to Gemini, `lazy` rises from the ashes, built on the very principles of its forebear, because some things are just too good to stay gone... even if it took over a decade.
+---
 
-```bash
-# Run directly
-./lazy/lazy
+## 🏛️ The Cyber-Baroque CLI
 
-# Recommended: Add alias to your .bashrc or .zshrc
-alias lazy="~/gemini/lazy/lazy"
-```
+For those moments when you wish to feel the tactile crunch of the terminal. 
 
-## 📖 The "Lazy" Workflow
-
-### 1. Dump Your Brain
-Don't worry about dates. If you don't specify one, it defaults to **Today**.
-You don't even need to type "add" or "a". Just type the task. No quotes needed.
-
-```bash
-lazy Buy Milk
-lazy Call Mom tmw
-lazy Fix the roof eventually
-```
-
-**The Killer Feature (Smart Parsing):**
-You can mix command words, multi-word descriptions, and multi-word dates. `lazy` figures it out.
+### 🕯️ The Core Workflow: "Smart Parsing"
+`lazy` is designed to understand you even when you're barely trying. It uses a **Smart Parsing** heuristic that lets you mix multi-word descriptions and natural language dates without quotes, flags, or effort.
 
 ```bash
-# "mv" is a command? No, here it's part of the task!
-# "this weekend" is a date? Yes!
-lazy mv boxes to the basement this weekend
+# No quotes. No "add" command. Just shout it at the terminal.
+lazy Buy eggs tomorrow
+lazy mv boxes to basement this weekend
+lazy call mom next fri
 ```
-*Result:* Adds task **"mv boxes to the basement"** due **Next Saturday**.
+*Result:* `lazy` handles the ambiguity, identifies the date, and saves the rest as the description.
 
-```bash
-# "ls" is a command? No!
-lazy ls my files next mon
-```
-*Result:* Adds task **"ls my files"** due **Next Monday**.
+### 📖 High-Status Rituals
 
-### 2. Check the Damage
-Run `lazy` to see *only* what is due today (or overdue). Ignore the future. The future is a problem for Future You.
-```bash
-lazy
-```
-
-### 3. The "Panic Button"
-Are there too many things on today's list? Do you feel overwhelmed?
-**Push everything to tomorrow.**
+#### 1. The Global Panic Button (Instant Relief)
+Are there too many things on today's list? Do you feel the friction of reality? Push it all away.
 ```bash
 lazy push
 ```
-*Effect:* Instantly reschedules all of today's pending tasks to tomorrow. 
-*Feeling:* Instant relief.
+*(Alias: `p`)*. Instantly reschedules all of today's pending tasks to tomorrow. Relief is mandatory.
 
-### 4. The "Not Today" Button
+#### 2. The "Not Today" Button
 Just one annoying task you want to ignore? Bump it.
 ```bash
 lazy bump <id>
 ```
-*(Alias: `lazy b`)*. Moves that specific task to **Tomorrow**. If you don't provide an ID, it bumps the first task on the list.
+*(Alias: `b`)*. Moves a specific task to **Tomorrow**. If no ID is provided, it bumps the first item on the list.
 
-### 5. Do ONE Thing
+#### 3. Do ONE Thing (The Focus Lens)
 If you must work, work on the single most urgent item.
 ```bash
 lazy focus
 ```
-*(Alias: `lazy 1`)*. This clears the screen and shows you exactly **one** task. Do it, or don't.
+*(Aliases: `1`, `one`)*. This clears the screen and shows you exactly **one** task. Do it, or don't.
 
-### 6. Revisionist History (Editing the Past)
-*New in v2026.04.27*
-
-Sometimes the way we phrased a task was... overly ambitious. Or perhaps we just want to change the aesthetic of our failures. 
-
-**Rename (The "I Misspoke" Tool):**
-If a task description no longer vibes with your current state of inertia, change it.
-```bash
-lazy rename <id> New and slightly less stressful description
-```
-*(Aliases: `rn`, `re`, `edit`)*. 
-
-**View (The "Abyss Gazer"):**
-Sometimes looking at the whole list is too much of a burden on the soul. You can now isolate a single task to study it in its lonely, uncompleted glory.
-```bash
-lazy view <id>
-```
-*(Aliases: `v`, `show`)*. It displays just that task. No distractions. Just you and your choices.
+#### 4. Revisionist History (Editing the Past)
+- **`lazy rename <id> <text>`**: Change a description to suit your current state of inertia. (Aliases: `rn`, `re`, `edit`).
+- **`lazy view <id>`**: Isolate a single task to study it in its lonely glory. (Aliases: `v`, `show`).
 
 ---
 
-## 🤖 The Robot Workforce (MCP Server)
+## 🛠 Command Reference: The Manual of Inaction
 
-For those who are too lazy even for a CLI, `lazy` includes a **Model Context Protocol (MCP)** server. This allows AI agents (like Gemini) to manage your backlog for you.
-
-### Tools for the Fleet
-The MCP server (`mcp_server.py`) exposes the following capabilities to agents:
-*   `lazy_add`: Add a task with natural language date parsing.
-*   `lazy_list`: Retrieve pending tasks (today or all).
-*   `lazy_done`: Mark a task as complete and dispense brand-aligned praise.
-*   `lazy_rename`: surgically update a task's description.
-*   **NEW** `lazy_move`: Reschedule a task to a new date using natural language.
-*   `lazy_push`: The global panic button.
-*   `lazy_get_messages`: Audit the LulzCorp brand's reservoir of whimsy.
-
-### Running the Server
-The server operates over stdio and is designed for integration with AI platforms.
-```bash
-python3 ~/gemini/lazy/mcp_server.py
-```
+| Command | Aliases | Description |
+| :--- | :--- | :--- |
+| `lazy` | | **List Today:** Shows only what is due today (and overdue). |
+| `lazy l` | `list`, `ls` | **List All:** Shows the entire backlog sorted by date. |
+| `lazy <text>` | `a`, `add`, `new` | **Add:** Just type the task. Dates are parsed automatically. |
+| `lazy d <id>` | `done` | **Done:** Marks task `<id>` as complete. Prints praise. |
+| `lazy m <id> <date>` | `mv`, `move` | **Reschedule:** Move a specific task to a new date. |
+| `lazy rn <id> <text>` | `re`, `rename`, `edit` | **Rename:** Change the description of an existing task. |
+| `lazy v <id>` | `view`, `show` | **View:** Display the full details of a single task. |
+| `lazy b [id]` | `bump` | **Bump:** Moves a task to tomorrow (defaults to top task). |
+| `lazy p` | `push` | **Push:** Moves ALL today's tasks to tomorrow. |
+| `lazy 1` | `one`, `focus` | **Focus:** Displays exactly one urgent task. |
+| `lazy t` | `triage` | **Triage:** Interactive loop to process today's tasks. |
+| `lazy help` | `-h`, `--help` | **Help:** Shows usage information (doesn't add a task named "help"). |
 
 ---
 
 ## 📅 The "Vibes-Based" Time System
 
-`lazy` understands that "Next Friday" is a feeling, not a coordinate.
-
-### The "Lazy Next" Algorithm
-If today is Thursday, and you say "Next Friday", standard calendars think you mean tomorrow.
-**Lazy people know that "Next Friday" means "Not this coming Friday, but the one after."**
-
-`lazy` enforces this.
-*   **"Friday"**: The upcoming Friday.
-*   **"Next Friday"**: The Friday of next week.
-*   **"Weekend"**: The upcoming Saturday.
-*   **"Next Weekend"**: The Saturday of next week.
-
-### Vague Timeframes
-Because specific dates are stressful.
-
-*   `soon` → +3 days
-*   `later` → +1 week
-*   `weekend` → Next Saturday
-*   `someday` / `eventually` → +1 month
-
-### Standard Offsets
-*   `today`, `tmw`, `yesterday`
-*   `+1` (1 day), `+1w` (1 week), `+1m` (1 month)
-*   **Milestones:** `eow` (End of Week / Fri), `eom` (End of Month), `eoy` (End of Year).
-*   **Days:** `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
-*   **Months:** `jan`, `feb`, `march`... (Defaults to 1st of next occurrence).
-*   **Next:** `next week`, `next month`, `next year`.
+`lazy` knows that "Next Friday" is a feeling. It uses the **"Lazy Next" Algorithm** to handle your procrastination patterns.
+- **"Friday"**: The upcoming Friday.
+- **"Next Friday"**: Not this coming Friday, but the one after.
+- **"EOW" / "EOM" / "EOY"**: End of Week (Fri), Month, or Year.
+- **"Soon"** (+3d), **"Later"** (+1w), **"Someday"** (+1m).
 
 ---
 
-## 🛠 Command Reference
+## ⚙️ Systems & Architecture
 
-| Command | Alias | Description |
-| :--- | :--- | :--- |
-| `lazy` | | **Focus Mode:** Lists tasks due **today** (and overdue). |
-| `lazy l` | `ls` | **List All:** Shows the entire backlog sorted by date. |
-| `lazy "Task"` | `a`, `new` | **Add:** Just type the task. Dates are parsed automatically. |
-| `lazy d <id>` | | **Done:** Marks task `<id>` as complete. Prints praise. |
-| `lazy rm <id>` | `del` | **Delete:** Permanently removes task `<id>`. |
-| `lazy p` | `push` | **Push:** Moves all today's tasks to tomorrow. |
-| `lazy b <id>` | `bump` | **Bump:** Moves a single task to tomorrow. |
-| `lazy 1` | `focus` | **One Thing:** Shows the single most urgent task. |
-| `lazy t` | `triage` | **Triage:** Interactive mode to process today's tasks. |
-| `lazy m <id> <date>` | `mv` | **Reschedule:** Move a specific task. |
-| `lazy rn <id> <text>` | `re`, `edit` | **Rename:** Change the description of an existing task. |
-| `lazy v <id>` | `show` | **View:** Display the details of a single, specific task. |
+- **Data Persistence:** A **SQLite** backend (`lazy.db`) ensures your tasks survive a reboot, even if your motivation doesn't. 
+- **Verification:** A full regression suite ensures the machinery of inaction remains stable. Run `python3 test_lazy.py`.
+- **Configuration:** `lazy/config.json` controls the aesthetic (colors) and the whimsical messages you receive.
 
 ---
 
-## ⚙️ Systems & Configuration
-
-### Data Architecture
-`lazy` utilizes a **SQLite** backend (`lazy.db`) to ensure your tasks survive a reboot, even if your motivation doesn't. 
-Schema: `id` (PK), `description` (TEXT), `due_date` (DATE), `status` (pending/done), `created_at` (TIMESTAMP).
-
-### Verification
-A full regression suite is available. You built it—test it.
-```bash
-python3 ~/gemini/lazy/test_lazy.py
-```
-
-### Configuration
-`lazy/config.json` allows you to customize the experience.
-
-```json
-{
-  "enable_colors": true,        // Red for overdue, Green for today
-  "empty_state_messages": [ ... ], // What it says when you have nothing to do
-  "completion_messages": [ ... ]   // The validation you crave when you finish a task
-}
-```
-
----
-
-*Now go take a nap.*
+*Now go take a nap. You've earned it by reading this.*
