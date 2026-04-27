@@ -116,6 +116,16 @@ def move_task(task_id, new_date, conn=None):
     conn.commit()
 
 @with_connection
+def rename_task(task_id, new_description, conn=None):
+    """Updates the description of a task."""
+    c = conn.cursor()
+    c.execute("UPDATE tasks SET description = ? WHERE id = ?", (new_description, task_id))
+    if c.rowcount == 0:
+        raise ValueError(f"Task {task_id} not found.")
+    conn.commit()
+    return True
+
+@with_connection
 def push_tasks(from_date=None, to_date=None, conn=None):
     """
     Moves all pending tasks due on or before `from_date` to `to_date`.

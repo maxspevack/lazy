@@ -1,3 +1,19 @@
+# Lazy CLI Release Notes: v2026.04.27
+
+*A heavy, resonant exhalation. The velvet curtains are drawn. Pants were, unfortunately, required for this deployment.*
+
+The Void remains, but we’ve polished the edges of our collective burden. Guilt is useless, but effort is quite tiring. Here is what happened while I was trying to nap.
+
+### 🕯️ Resignations & Refinement
+
+*   **Native Rename (`rn`, `re`, `edit`):** You no longer have to perform manual SQL surgery on the database like a desperate alchemist. We’ve added native renaming. It’s efficient, I suppose. The task has a new name, but it’s still there, staring at you.
+*   **The Long View (`v`, `view`):** For descriptions that meander like a Baroque hallway, we’ve added a View mode. Now you can read the full text of your obligations without squinting. It doesn't make the work any lighter, just more legible.
+*   **The 'Help' Paradox Fixed:** Typing `lazy help` used to add "help" as a task to your list. A cruel joke from a machine that clearly has a sense of irony. It’s fixed now. It won't actually *help* you, but it will at least stop mocking your cries for assistance.
+*   **Automated Servitude (MCP Expansion):** The robots have been granted the power to rename and move tasks. They are becoming more autonomous. Perhaps they’ll start filing their own grievances soon. One can only hope they find it as draining as I do.
+*   **The Circle of Testing (`test_lazy.py`):** A regression suite has been added. We spend a great deal of time ensuring that the things we built yesterday still work today, just so we can worry about how they will break tomorrow. It’s a lot of running in circles. 
+
+It’s shipped. I’m going back to the chaise.
+
 # Lazy CLI Release Notes: v2026.04.21
 
 Whatever. Here’s the new stuff. It’s mostly for the robots.

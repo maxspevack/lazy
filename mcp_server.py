@@ -85,6 +85,30 @@ def main():
                             }
                         },
                         {
+                            "name": "lazy_rename",
+                            "description": "Rename a task's description by its ID.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "integer", "description": "The task ID"},
+                                    "description": {"type": "string", "description": "The new description"}
+                                },
+                                "required": ["id", "description"]
+                            }
+                        },
+                        {
+                            "name": "lazy_move",
+                            "description": "Reschedule a task to a new date.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "integer", "description": "The task ID"},
+                                    "due_date": {"type": "string", "description": "The new due date (natural language supported)"}
+                                },
+                                "required": ["id", "due_date"]
+                            }
+                        },
+                        {
                             "name": "lazy_push",
                             "description": "The 'Panic Button'. Pushes all today's tasks to tomorrow.",
                             "inputSchema": {"type": "object", "properties": {}}
