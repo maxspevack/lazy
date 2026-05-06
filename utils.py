@@ -31,6 +31,25 @@ def load_config():
         
     return _config_cache
 
+def get_vibe_echo(description, date_obj):
+    """
+    Generates a vibe-aligned feedback message for a newly added task.
+    """
+    config = load_config()
+    today = date.today()
+    
+    if date_obj == today:
+        date_str = "today"
+    elif date_obj == today + timedelta(days=1):
+        date_str = "tomorrow"
+    else:
+        date_str = date_obj.strftime("%a, %b %d")
+        
+    messages = config.get('add_echo_messages', [f"Added '{description}' for {date_str}."])
+    import random
+    msg = random.choice(messages)
+    return msg.replace("{description}", description).replace("{date}", date_str)
+
 def parse_date(date_str):
     """
     Parses a natural language date string into a datetime.date object.
@@ -66,23 +85,47 @@ def parse_date(date_str):
     today = date.today()
     lower_str = date_str.lower().strip()
 
+    # 0. Fuzzy "in X days" or just "X days"
+    match_in = re.match(r"(?:in\s+)?(\d+)\s+days?", lower_str)
+    if match_in:
+        return today + timedelta(days=int(match_in.group(1)))
+    
+    match_in_w = re.match(r"(?:in\s+)?(\d+)\s+weeks?", lower_str)
+    if match_in_w:
+        return today + timedelta(weeks=int(match_in_w.group(1)))
+
+    match_in_m = re.match(r"(?:in\s+)?(\d+)\s+months?", lower_str)
+    if match_in_m:
+        months = int(match_in_m.group(1))
+        new_month = today.month + months
+        year_add = (new_month - 1) // 12
+        new_month = (new_month - 1) % 12 + 1
+        new_year = today.year + year_add
+        _, max_days = calendar.monthrange(new_year, new_month)
+        new_day = min(today.day, max_days)
+        return date(new_year, new_month, new_day)
+
     # 1. Keywords
     if lower_str in ('today', 'tod'):
         return today
+    if lower_str == 'yesterday':
+        return today - timedelta(days=1)
     if lower_str in ('tomorrow', 'tmw', 'tom'):
         return today + timedelta(days=1)
     
     # 2. Relative offsets (+1, +7)
-    if lower_str.startswith('+'):
-        # ... (same as before) ...
+    if lower_str.startswith('+') or lower_str[0].isdigit():
+        # Handle cases like "3 days" or "+3"
+        clean_str = lower_str[1:] if lower_str.startswith('+') else lower_str
+        
         try:
             # Check for suffixes
-            if lower_str.endswith('w'):
-                weeks = int(lower_str[1:-1])
-                return today + timedelta(weeks=weeks)
-            elif lower_str.endswith('m'):
-                months = int(lower_str[1:-1])
-                # Simple month adder: same day next month
+            if clean_str.endswith('d'):
+                return today + timedelta(days=int(clean_str[:-1]))
+            elif clean_str.endswith('w'):
+                return today + timedelta(weeks=int(clean_str[:-1]))
+            elif clean_str.endswith('m'):
+                months = int(clean_str[:-1])
                 new_month = today.month + months
                 year_add = (new_month - 1) // 12
                 new_month = (new_month - 1) % 12 + 1
@@ -90,19 +133,18 @@ def parse_date(date_str):
                 _, max_days = calendar.monthrange(new_year, new_month)
                 new_day = min(today.day, max_days)
                 return date(new_year, new_month, new_day)
-            elif lower_str.endswith('y'):
-                years = int(lower_str[1:-1])
+            elif clean_str.endswith('y'):
+                years = int(clean_str[:-1])
                 try:
                     return today.replace(year=today.year + years)
                 except ValueError:
                     return today + timedelta(days=365 * years) 
-            else:
-                days = int(lower_str[1:])
-                return today + timedelta(days=days)
+            elif clean_str.isdigit():
+                return today + timedelta(days=int(clean_str))
         except ValueError:
             pass
     
-    # 2b. Shorthand w/m/y without plus
+    # 2b. Shorthand w/m/y without plus (already handled above partly, but let's be explicit)
     if lower_str[-1] in ('w', 'm', 'y') and lower_str[:-1].isdigit():
         val = int(lower_str[:-1])
         if lower_str.endswith('w'):

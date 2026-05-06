@@ -23,11 +23,19 @@ from utils import parse_date, load_config
 # Basic ANSI color codes
 COLOR_RED = "\033[91m"
 COLOR_GREEN = "\033[92m"
+COLOR_GRAY = "\033[90m"
+STYLE_DIM = "\033[2m"
+STYLE_BOLD = "\033[1m"
 COLOR_RESET = "\033[0m"
+
+# Aura Symbols
+SYM_OVERDUE = "⚑"
+SYM_TODAY = "●"
+SYM_FUTURE = "○"
 
 def print_tasks(tasks, show_date=False):
     """
-    Formats and prints a list of tasks to the console.
+    Formats and prints a list of tasks to the console with Aura Rendering.
     """
     if not tasks:
         config = load_config()
@@ -41,7 +49,7 @@ def print_tasks(tasks, show_date=False):
     today_date = date.today()
     
     print(f"{ 'ID':<4} { 'Due Date':<15} {'Description'}")
-    print("-" * 40)
+    print("-" * 50)
     
     for task in tasks:
         t_id = str(task['id'])
@@ -50,32 +58,36 @@ def print_tasks(tasks, show_date=False):
         
         formatted_date = t_date_obj.strftime("%a %Y-%m-%d")
         
-        color_prefix = ""
-        color_suffix = ""
+        prefix = ""
+        suffix = COLOR_RESET if enable_colors else ""
+        symbol = SYM_FUTURE
 
         if enable_colors:
             if t_date_obj < today_date:
-                color_prefix = COLOR_RED # Overdue
+                prefix = COLOR_RED + STYLE_BOLD # Overdue
+                symbol = SYM_OVERDUE
             elif t_date_obj == today_date:
-                color_prefix = COLOR_GREEN # Today
-            
-            if color_prefix:
-                color_suffix = COLOR_RESET
+                prefix = COLOR_GREEN # Today
+                symbol = SYM_TODAY
+            elif t_date_obj <= today_date + timedelta(days=7):
+                prefix = "" # Next Week (Normal console color)
+                symbol = SYM_FUTURE
+            else:
+                prefix = COLOR_GRAY # Distant Future
+                symbol = SYM_FUTURE
         
         if show_date: # For 'lazy l' (list all)
-            print(f"{color_prefix}{t_id:<4} {formatted_date:<15} {t_desc}{color_suffix}")
+            print(f"{prefix}{t_id:<4} {formatted_date:<15} {symbol} {t_desc}{suffix}")
         else: # For 'lazy' (list today)
-            if t_date_obj < today_date:
-                print(f"{color_prefix}{t_id:<4} {formatted_date:<15} {t_desc}{color_suffix}")
-            elif t_date_obj == today_date:
-                print(f"{color_prefix}{t_id:<4} {'':<15} {t_desc}{color_suffix}")
+            if t_date_obj <= today_date:
+                print(f"{prefix}{t_id:<4} {formatted_date:<15} {symbol} {t_desc}{suffix}")
             else:
-                print(f"{t_id:<4} {'':<15} {t_desc}")
+                print(f"{prefix}{t_id:<4} {'':<15} {symbol} {t_desc}{suffix}")
 
 # Command Handlers
 
 def cmd_add(args, conn):
-    """Handles 'lazy add'."""
+    """Handles 'lazy add' with Natural Echo."""
     input_list = args.task_input
     if not input_list:
         print("Error: Description required.")
@@ -97,6 +109,11 @@ def cmd_add(args, conn):
         try:
             d_date = parse_date(last_one)
             description = " ".join(input_list[:-1])
+            # Strip trailing prepositions
+            for prep in ['in', 'at', 'on', 'for']:
+                if description.lower().endswith(f" {prep}"):
+                    description = description[:-(len(prep)+1)].strip()
+                    break
         except ValueError:
             pass
             
@@ -105,8 +122,9 @@ def cmd_add(args, conn):
         d_date = date.today()
         
     try:
+        from utils import get_vibe_echo
         new_id = add_task(description, d_date, conn=conn)
-        print(f"Added [{new_id}] \"{description}\" for {d_date}.")
+        print(f"[{new_id}] {get_vibe_echo(description, d_date)}")
     except Exception as e:
         print(f"Error: {e}")
 
@@ -229,29 +247,60 @@ def cmd_bump(args, conn):
         print(f"Task [{task_id}] not found.")
 
 def cmd_triage(args, conn):
-    """Handles 'lazy triage'."""
+    """Handles 'lazy triage' with a high-status instant-key loop."""
     tasks = get_tasks('today', conn=conn)
     if not tasks:
-        print("No tasks to triage today!")
+        print("No tasks to triage today! Maximum chill.")
         return
 
-    print("\n--- Starting Triage ---")
+    import termios
+    import tty
+
+    def get_key():
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
+    print(f"\n{STYLE_BOLD}--- TRIAGE MODE ---{COLOR_RESET}")
+    print("Keys: (d)one, (b)ump, (p)ush all, (s)kip, (q)uit")
+
     for task in tasks:
         t_id, t_desc = task['id'], task['description']
-        print(f"\n[{t_id}] {t_desc}")
-        action = input("Action (d)one, (s)kip, (t)omorrow, (m)ove <date>, (q)uit: ").strip().lower()
-        if action == 'd':
-            complete_task(t_id, conn=conn)
-        elif action == 't':
-            move_task(t_id, date.today() + timedelta(days=1), conn=conn)
-        elif action.startswith('m '):
-            try:
-                move_task(t_id, parse_date(action[2:].strip()), conn=conn)
-            except ValueError as e:
-                print(f"Error: {e}")
-        elif action == 'q':
-            break
-    print("--- Triage Complete ---")
+        print(f"\n[{t_id}] {STYLE_BOLD}{t_desc}{COLOR_RESET}")
+        
+        while True:
+            sys.stdout.write("Action: ")
+            sys.stdout.flush()
+            key = get_key().lower()
+            
+            if key == 'd':
+                complete_task(t_id, conn=conn)
+                print(f"{COLOR_GREEN}DONE{COLOR_RESET}")
+                break
+            elif key == 'b':
+                new_date = date.today() + timedelta(days=1)
+                move_task(t_id, new_date, conn=conn)
+                print(f"{COLOR_GRAY}BUMPED to tomorrow{COLOR_RESET}")
+                break
+            elif key == 'p':
+                count = push_tasks(conn=conn)
+                print(f"\n{COLOR_GRAY}PUSHED {count} tasks to tomorrow. Triage ending.{COLOR_RESET}")
+                return
+            elif key == 's':
+                print("SKIPPED")
+                break
+            elif key == 'q':
+                print("\nTRIAGE ABORTED.")
+                return
+            else:
+                pass
+                
+    print(f"\n{STYLE_BOLD}--- TRIAGE COMPLETE ---{COLOR_RESET}")
 
 def main():
     init_db()
