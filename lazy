@@ -1,323 +1,261 @@
 #!/usr/bin/env python3
-"""
-lazy/lazy - A Procrastinator's CLI Task Manager
-
-This script provides the command-line interface for the Lazy tool.
-It handles user input, parses arguments using argparse, and orchestrates
-the application logic by invoking the database and utility modules.
+"""lazy/lazy — A Procrastinator's CLI Task Manager.
 
 Philosophy: "Why do today what you can push to tomorrow?"
 """
 
-__version__ = "v2026.04.27"
+__version__ = "v2026.05.05"
 
 import argparse
-import sys
-import json
 import random
-import os.path
+import sys
 from datetime import date, timedelta
-from db import init_db, add_task, get_tasks, complete_task, delete_task, move_task, rename_task, get_task, push_tasks, get_connection
-from utils import parse_date, load_config
 
-# Basic ANSI color codes
-COLOR_RED = "\033[91m"
-COLOR_GREEN = "\033[92m"
-COLOR_GRAY = "\033[90m"
-STYLE_DIM = "\033[2m"
-STYLE_BOLD = "\033[1m"
-COLOR_RESET = "\033[0m"
+from db import (add_task, complete_task, delete_task, get_connection, get_task,
+                get_tasks, move_task, push_tasks, rename_task)
+from utils import get_vibe_echo, load_config, parse_date
 
-# Aura Symbols
-SYM_OVERDUE = "⚑"
-SYM_TODAY = "●"
-SYM_FUTURE = "○"
+RED, GREEN, GRAY, BOLD, RESET = "\033[91m", "\033[92m", "\033[90m", "\033[1m", "\033[0m"
+SYM_OVERDUE, SYM_TODAY, SYM_FUTURE = "⚑", "●", "○"
+STRIPPABLE_PREPS = ('in', 'at', 'on', 'for')
+
+
+def _aura(due, today):
+    """Return (color_prefix, symbol) for a due date relative to today."""
+    if due < today:                      return RED + BOLD, SYM_OVERDUE
+    if due == today:                     return GREEN, SYM_TODAY
+    if due <= today + timedelta(days=7): return "", SYM_FUTURE
+    return GRAY, SYM_FUTURE
+
 
 def print_tasks(tasks, show_date=False):
-    """
-    Formats and prints a list of tasks to the console with Aura Rendering.
-    """
+    """Render tasks with Aura colors. show_date=True forces date column for future items."""
     if not tasks:
-        config = load_config()
-        messages = config.get('empty_state_messages', ["Nothing to do! (You lazy animal)"])
-        print(random.choice(messages))
+        msgs = load_config().get('empty_state_messages', ["Nothing to do! (You lazy animal)"])
+        print(random.choice(msgs))
         return
 
-    config = load_config()
-    enable_colors = config.get('enable_colors', True)
+    enable_colors = load_config().get('enable_colors', True)
+    today = date.today()
 
-    today_date = date.today()
-    
-    print(f"{ 'ID':<4} { 'Due Date':<15} {'Description'}")
+    print(f"{'ID':<4} {'Due Date':<15} Description")
     print("-" * 50)
-    
     for task in tasks:
-        t_id = str(task['id'])
-        t_date_obj = date.fromisoformat(task['due_date'])
-        t_desc = task['description']
-        
-        formatted_date = t_date_obj.strftime("%a %Y-%m-%d")
-        
-        prefix = ""
-        suffix = COLOR_RESET if enable_colors else ""
-        symbol = SYM_FUTURE
+        due = date.fromisoformat(task['due_date'])
+        prefix, symbol = _aura(due, today) if enable_colors else ("", SYM_FUTURE)
+        suffix = RESET if enable_colors else ""
+        date_col = due.strftime("%a %Y-%m-%d") if (show_date or due <= today) else ""
+        print(f"{prefix}{str(task['id']):<4} {date_col:<15} {symbol} {task['description']}{suffix}")
 
-        if enable_colors:
-            if t_date_obj < today_date:
-                prefix = COLOR_RED + STYLE_BOLD # Overdue
-                symbol = SYM_OVERDUE
-            elif t_date_obj == today_date:
-                prefix = COLOR_GREEN # Today
-                symbol = SYM_TODAY
-            elif t_date_obj <= today_date + timedelta(days=7):
-                prefix = "" # Next Week (Normal console color)
-                symbol = SYM_FUTURE
-            else:
-                prefix = COLOR_GRAY # Distant Future
-                symbol = SYM_FUTURE
-        
-        if show_date: # For 'lazy l' (list all)
-            print(f"{prefix}{t_id:<4} {formatted_date:<15} {symbol} {t_desc}{suffix}")
-        else: # For 'lazy' (list today)
-            if t_date_obj <= today_date:
-                print(f"{prefix}{t_id:<4} {formatted_date:<15} {symbol} {t_desc}{suffix}")
-            else:
-                print(f"{prefix}{t_id:<4} {'':<15} {symbol} {t_desc}{suffix}")
 
-# Command Handlers
+def _split_description_and_date(words):
+    """From an argv-style list, peel off a trailing date phrase. Returns (description, date)."""
+    for take in (2, 1):
+        if len(words) > take:
+            try:
+                d = parse_date(" ".join(words[-take:]))
+                desc = " ".join(words[:-take]).strip()
+                if take == 1:
+                    for prep in STRIPPABLE_PREPS:
+                        if desc.lower().endswith(f" {prep}"):
+                            desc = desc[:-(len(prep) + 1)].rstrip()
+                            break
+                return desc, d
+            except ValueError:
+                continue
+    return " ".join(words).strip(), date.today()
+
 
 def cmd_add(args, conn):
-    """Handles 'lazy add' with Natural Echo."""
-    input_list = args.task_input
-    if not input_list:
+    if not args.task_input:
         print("Error: Description required.")
         sys.exit(1)
-        
-    description = None
-    d_date = None
-    
-    if len(input_list) >= 3:
-        last_two = " ".join(input_list[-2:])
-        try:
-            d_date = parse_date(last_two)
-            description = " ".join(input_list[:-2])
-        except ValueError:
-            pass
-    
-    if d_date is None and len(input_list) >= 2:
-        last_one = input_list[-1]
-        try:
-            d_date = parse_date(last_one)
-            description = " ".join(input_list[:-1])
-            # Strip trailing prepositions
-            for prep in ['in', 'at', 'on', 'for']:
-                if description.lower().endswith(f" {prep}"):
-                    description = description[:-(len(prep)+1)].strip()
-                    break
-        except ValueError:
-            pass
-            
-    if d_date is None:
-        description = " ".join(input_list)
-        d_date = date.today()
-        
-    try:
-        from utils import get_vibe_echo
-        new_id = add_task(description, d_date, conn=conn)
-        print(f"[{new_id}] {get_vibe_echo(description, d_date)}")
-    except Exception as e:
-        print(f"Error: {e}")
+    description, due = _split_description_and_date(args.task_input)
+    new_id = add_task(description, due, conn)
+    print(f"[{new_id}] {get_vibe_echo(description, due)}")
+
 
 def cmd_list(args, conn):
-    """Handles 'lazy list'."""
-    tasks = get_tasks('all', conn=conn)
-    print_tasks(tasks, show_date=True)
+    print_tasks(get_tasks('all', conn), show_date=True)
+
 
 def cmd_one(args, conn):
-    """Handles 'lazy focus'/'one'."""
-    tasks = get_tasks('all', conn=conn)
+    tasks = get_tasks('all', conn)
     if not tasks:
         print_tasks(tasks)
         return
-        
-    task = tasks[0]
-    print("\n" + "=" * 40)
-    print("   DO THIS ONE THING")
-    print("=" * 40 + "\n")
-    
-    t_id = str(task['id'])
-    t_desc = task['description']
-    t_date_obj = date.fromisoformat(task['due_date'])
-    formatted_date = t_date_obj.strftime("%a %Y-%m-%d")
-    
-    note = " (OVERDUE!)" if t_date_obj < date.today() else ""
-    
-    print(f"[{t_id}] {t_desc}")
-    print(f"Due: {formatted_date}{note}")
-    print("\n" + "=" * 40 + "\n")
+    t = tasks[0]
+    due = date.fromisoformat(t['due_date'])
+    note = " (OVERDUE!)" if due < date.today() else ""
+    bar = "=" * 40
+    print(f"\n{bar}\n   DO THIS ONE THING\n{bar}\n")
+    print(f"[{t['id']}] {t['description']}")
+    print(f"Due: {due.strftime('%a %Y-%m-%d')}{note}")
+    print(f"\n{bar}\n")
+
 
 def cmd_done(args, conn):
-    """Handles 'lazy done'."""
-    task = get_task(args.id, conn=conn)
-    if task:
-        complete_task(args.id, conn=conn)
-        config = load_config()
-        praises = config.get('completion_messages', ["Completed."])
-        print(f"[{args.id}] {task['description']} -> DONE.")
-        print(f"✨ {random.choice(praises)}")
-    else:
+    task = get_task(args.id, conn)
+    if not task:
         print(f"Task [{args.id}] not found.")
+        return
+    complete_task(args.id, conn)
+    praises = load_config().get('completion_messages', ["Completed."])
+    print(f"[{args.id}] {task['description']} -> DONE.")
+    print(f"✨ {random.choice(praises)}")
+
 
 def cmd_remove(args, conn):
-    """Handles 'lazy rm'."""
-    task = get_task(args.id, conn=conn)
-    if task:
-        delete_task(args.id, conn=conn)
-        print(f"Deleted [{args.id}] \"{task['description']}\".")
-    else:
+    task = get_task(args.id, conn)
+    if not task:
         print(f"Task [{args.id}] not found.")
+        return
+    delete_task(args.id, conn)
+    print(f"Deleted [{args.id}] \"{task['description']}\".")
+
 
 def cmd_move(args, conn):
-    """Handles 'lazy move'."""
-    task = get_task(args.id, conn=conn)
-    if task:
-        try:
-            date_str = " ".join(args.date)
-            new_date = parse_date(date_str)
-            move_task(args.id, new_date, conn=conn)
-            print(f"Moved [{args.id}] \"{task['description']}\" to {new_date}.")
-        except ValueError as e:
-            print(f"Error: {e}")
-    else:
+    task = get_task(args.id, conn)
+    if not task:
         print(f"Task [{args.id}] not found.")
+        return
+    try:
+        new_date = parse_date(" ".join(args.date))
+    except ValueError as e:
+        print(f"Error: {e}")
+        return
+    move_task(args.id, new_date, conn)
+    print(f"Moved [{args.id}] \"{task['description']}\" to {new_date}.")
+
 
 def cmd_rename(args, conn):
-    """Handles 'lazy rename'."""
-    task = get_task(args.id, conn=conn)
-    if task:
-        new_desc = " ".join(args.description)
-        if not new_desc:
-            print("Error: New description required.")
-            return
-        rename_task(args.id, new_desc, conn=conn)
-        print(f"Renamed [{args.id}] to \"{new_desc}\".")
-    else:
+    task = get_task(args.id, conn)
+    if not task:
         print(f"Task [{args.id}] not found.")
+        return
+    new_desc = " ".join(args.description).strip()
+    if not new_desc:
+        print("Error: New description required.")
+        return
+    rename_task(args.id, new_desc, conn)
+    print(f"Renamed [{args.id}] to \"{new_desc}\".")
+
 
 def cmd_view(args, conn):
-    """Handles 'lazy view'."""
-    task = get_task(args.id, conn=conn)
-    if task:
-        print("\n--- Task Details ---")
-        print(f"ID:          {task['id']}")
-        print(f"Description: {task['description']}")
-        print(f"Due Date:    {task['due_date']}")
-        print(f"Status:      {task['status']}")
-        print(f"Created At:  {task['created_at']}")
-        print("--------------------\n")
-    else:
+    task = get_task(args.id, conn)
+    if not task:
         print(f"Task [{args.id}] not found.")
+        return
+    print("\n--- Task Details ---")
+    print(f"ID:          {task['id']}")
+    print(f"Description: {task['description']}")
+    print(f"Due Date:    {task['due_date']}")
+    print(f"Status:      {task['status']}")
+    print(f"Created At:  {task['created_at']}")
+    print("--------------------\n")
+
 
 def cmd_push(args, conn):
-    """Handles 'lazy push'."""
-    count = push_tasks(conn=conn)
-    if count > 0:
-        print(f"Pushed {count} task(s) to tomorrow. Breathe.")
-    else:
-        print("Nothing to push!")
+    count = push_tasks(conn)
+    print(f"Pushed {count} task(s) to tomorrow. Breathe." if count else "Nothing to push!")
+
 
 def cmd_bump(args, conn):
-    """Handles 'lazy bump'."""
     task_id = args.id
     if task_id is None:
-        tasks = get_tasks('today', conn=conn)
+        tasks = get_tasks('today', conn)
         if not tasks:
             print("Nothing to bump!")
             return
         task_id = tasks[0]['id']
-
-    task = get_task(task_id, conn=conn)
-    if task:
-        current_due = date.fromisoformat(task['due_date'])
-        today = date.today()
-        new_date = (max(current_due, today) + timedelta(days=1))
-        move_task(task_id, new_date, conn=conn)
-        print(f"Bumped [{task_id}] to {new_date}.")
-    else:
+    task = get_task(task_id, conn)
+    if not task:
         print(f"Task [{task_id}] not found.")
+        return
+    current_due = date.fromisoformat(task['due_date'])
+    new_date = max(current_due, date.today()) + timedelta(days=1)
+    move_task(task_id, new_date, conn)
+    print(f"Bumped [{task_id}] to {new_date}.")
+
 
 def cmd_triage(args, conn):
-    """Handles 'lazy triage' with a high-status instant-key loop."""
-    tasks = get_tasks('today', conn=conn)
-    if not tasks:
-        print("No tasks to triage today! Maximum chill.")
-        return
-
+    """Interactive single-key triage: (d)one, (b)ump, (p)ush, (s)kip, (q)uit."""
     import termios
     import tty
 
     def get_key():
         fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
+        old = termios.tcgetattr(fd)
         try:
-            tty.setraw(sys.stdin.fileno())
-            ch = sys.stdin.read(1)
+            tty.setraw(fd)
+            return sys.stdin.read(1)
         finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    print(f"\n{STYLE_BOLD}--- TRIAGE MODE ---{COLOR_RESET}")
+    tasks = get_tasks('today', conn)
+    if not tasks:
+        print("No tasks to triage today! Maximum chill.")
+        return
+
+    print(f"\n{BOLD}--- TRIAGE MODE ---{RESET}")
     print("Keys: (d)one, (b)ump, (p)ush all, (s)kip, (q)uit")
 
     for task in tasks:
-        t_id, t_desc = task['id'], task['description']
-        print(f"\n[{t_id}] {STYLE_BOLD}{t_desc}{COLOR_RESET}")
-        
+        print(f"\n[{task['id']}] {BOLD}{task['description']}{RESET}")
         while True:
             sys.stdout.write("Action: ")
             sys.stdout.flush()
             key = get_key().lower()
-            
             if key == 'd':
-                complete_task(t_id, conn=conn)
-                print(f"{COLOR_GREEN}DONE{COLOR_RESET}")
+                complete_task(task['id'], conn)
+                print(f"{GREEN}DONE{RESET}")
                 break
-            elif key == 'b':
-                new_date = date.today() + timedelta(days=1)
-                move_task(t_id, new_date, conn=conn)
-                print(f"{COLOR_GRAY}BUMPED to tomorrow{COLOR_RESET}")
+            if key == 'b':
+                move_task(task['id'], date.today() + timedelta(days=1), conn)
+                print(f"{GRAY}BUMPED to tomorrow{RESET}")
                 break
-            elif key == 'p':
-                count = push_tasks(conn=conn)
-                print(f"\n{COLOR_GRAY}PUSHED {count} tasks to tomorrow. Triage ending.{COLOR_RESET}")
+            if key == 'p':
+                count = push_tasks(conn)
+                print(f"\n{GRAY}PUSHED {count} tasks to tomorrow. Triage ending.{RESET}")
                 return
-            elif key == 's':
+            if key == 's':
                 print("SKIPPED")
                 break
-            elif key == 'q':
+            if key == 'q':
                 print("\nTRIAGE ABORTED.")
                 return
-            else:
-                pass
-                
-    print(f"\n{STYLE_BOLD}--- TRIAGE COMPLETE ---{COLOR_RESET}")
 
-def main():
-    init_db()
-    
-    # Pre-parse check for 'lazy help' alias
-    if len(sys.argv) > 1 and sys.argv[1] == 'help':
-        sys.argv[1] = '--help'
+    print(f"\n{BOLD}--- TRIAGE COMPLETE ---{RESET}")
 
-    description = "Lazy - A Procrastinator's Task Manager"
+
+# Dispatch table: name -> (aliases, takes_id, accepts_extra, func).
+# `takes_id` means the first positional is an integer task ID.
+# `accepts_extra` means the command legitimately consumes trailing words.
+COMMANDS = [
+    ('a',   ['add', 'new'],            False, True,  cmd_add),
+    ('l',   ['list', 'ls'],            False, False, cmd_list),
+    ('one', ['1', 'focus'],            False, False, cmd_one),
+    ('d',   ['done'],                  True,  False, cmd_done),
+    ('rm',  ['remove', 'del', 'delete'], True, False, cmd_remove),
+    ('m',   ['mv', 'move', 'reschedule'], True, True,  cmd_move),
+    ('rn',  ['re', 'rename', 'edit'],  True,  True,  cmd_rename),
+    ('v',   ['view', 'show'],          True,  False, cmd_view),
+    ('p',   ['push'],                  False, False, cmd_push),
+    ('b',   ['bump'],                  True,  False, cmd_bump),
+    ('t',   ['triage'],                False, False, cmd_triage),
+]
+
+
+def _build_parser():
     usage = """
   lazy                      List tasks due today or overdue
   lazy <desc> [date]        Add a task (e.g., 'lazy Buy milk tmw')
-  
+
 Commands:
   a, add, new <desc> [date] Add a task
   l, list, ls               List all pending tasks
   d, done <id>              Mark task as complete
+  rm, del <id>              Delete a task permanently
   m, mv, move <id> <date>   Reschedule a task
   rn, re, edit <id> <desc>  Rename a task's description
   v, view, show <id>        View task details
@@ -326,107 +264,69 @@ Commands:
   1, focus, one             Focus on the single most urgent task
   t, triage                 Interactively process today's tasks
 """
-    parser = argparse.ArgumentParser(description=description, usage=usage, formatter_class=argparse.RawTextHelpFormatter, add_help=False)
+    parser = argparse.ArgumentParser(
+        description="Lazy - A Procrastinator's Task Manager",
+        usage=usage, formatter_class=argparse.RawTextHelpFormatter, add_help=False
+    )
     parser.add_argument('-h', '--help', action='help', help='Show this help message and exit')
-    subparsers = parser.add_subparsers(dest='command')
+    subs = parser.add_subparsers(dest='command')
+    for name, aliases, takes_id, accepts_extra, func in COMMANDS:
+        sp = subs.add_parser(name, aliases=aliases)
+        if name == 'a':
+            sp.add_argument('task_input', nargs=argparse.REMAINDER)
+        elif name == 'b':
+            sp.add_argument('id', type=int, nargs='?')
+        elif takes_id and accepts_extra:
+            sp.add_argument('id', type=int)
+            sp.add_argument('date' if name == 'm' else 'description',
+                            type=str, nargs=argparse.REMAINDER)
+        elif takes_id:
+            sp.add_argument('id', type=int)
+        sp.set_defaults(func=func)
+    subs.add_parser('help')
+    return parser
 
-    # Add (a)
-    parser_add = subparsers.add_parser('a', aliases=['add', 'new'])
-    parser_add.add_argument('task_input', nargs=argparse.REMAINDER)
-    parser_add.set_defaults(func=cmd_add)
 
-    # List (l)
-    parser_list = subparsers.add_parser('l', aliases=['list', 'ls'])
-    parser_list.set_defaults(func=cmd_list)
+def _maybe_inject_add(parser):
+    """Heuristic: if argv looks like 'lazy <not-a-command> ...', insert 'a' as the verb."""
+    if len(sys.argv) <= 1:
+        return
+    known = set(parser._subparsers._group_actions[0].choices)
+    known.update({'-h', '--help'})
 
-    # One (1)
-    parser_one = subparsers.add_parser('one', aliases=['1', 'focus'])
-    parser_one.set_defaults(func=cmd_one)
-    
-    # Done (d)
-    parser_done = subparsers.add_parser('d', aliases=['done'])
-    parser_done.add_argument('id', type=int)
-    parser_done.set_defaults(func=cmd_done)
+    first = sys.argv[1]
+    inject = False
+    if first not in known:
+        inject = not first.startswith('-')
+    else:
+        # Find the COMMAND row for this name/alias to learn its expected shape.
+        row = next(((n, ti, ax) for n, al, ti, ax, _ in COMMANDS
+                    if first == n or first in al), None)
+        if row and len(sys.argv) > 2 and not sys.argv[2].startswith('-'):
+            _, takes_id, accepts_extra = row
+            if takes_id and not sys.argv[2].isdigit():
+                inject = True
+            elif not takes_id and not accepts_extra:
+                inject = True
+    if inject:
+        sys.argv.insert(1, 'a')
 
-    # Remove (rm)
-    parser_rm = subparsers.add_parser('rm', aliases=['remove', 'del', 'delete'])
-    parser_rm.add_argument('id', type=int)
-    parser_rm.set_defaults(func=cmd_remove)
 
-    # Move (m)
-    parser_mv = subparsers.add_parser('m', aliases=['mv', 'move', 'reschedule'])
-    parser_mv.add_argument('id', type=int)
-    parser_mv.add_argument('date', type=str, nargs=argparse.REMAINDER)
-    parser_mv.set_defaults(func=cmd_move)
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'help':
+        sys.argv[1] = '--help'
 
-    # Rename (rn)
-    parser_rn = subparsers.add_parser('rn', aliases=['re', 'rename', 'edit'])
-    parser_rn.add_argument('id', type=int)
-    parser_rn.add_argument('description', type=str, nargs=argparse.REMAINDER)
-    parser_rn.set_defaults(func=cmd_rename)
-
-    # View (v)
-    parser_v = subparsers.add_parser('v', aliases=['view', 'show'])
-    parser_v.add_argument('id', type=int)
-    parser_v.set_defaults(func=cmd_view)
-
-    # Push (p)
-    parser_push = subparsers.add_parser('p', aliases=['push'])
-    parser_push.set_defaults(func=cmd_push)
-
-    # Bump (b)
-    parser_bump = subparsers.add_parser('b', aliases=['bump'])
-    parser_bump.add_argument('id', type=int, nargs='?')
-    parser_bump.set_defaults(func=cmd_bump)
-
-    # Triage (t)
-    parser_triage = subparsers.add_parser('t', aliases=['triage'])
-    parser_triage.set_defaults(func=cmd_triage)
-
-    # Help
-    subparsers.add_parser('help')
+    parser = _build_parser()
 
     if len(sys.argv) == 1:
         conn = get_connection()
         try:
-            print_tasks(get_tasks('today', conn=conn))
+            print_tasks(get_tasks('today', conn))
         finally:
             conn.close()
-        sys.exit(0)
+        return
 
-    COMMAND_SPECS = {
-        'l': None, 'list': None, 'ls': None,
-        'p': None, 'push': None,
-        't': None, 'triage': None,
-        '1': None, 'one': None, 'focus': None,
-        'd': 'id', 'done': 'id',
-        'rm': 'id', 'remove': 'id', 'del': 'id', 'delete': 'id',
-        'm': 'id', 'mv': 'id', 'move': 'id', 'reschedule': 'id',
-        'rn': 'id', 're': 'id', 'rename': 'id', 'edit': 'id',
-        'v': 'id', 'view': 'id', 'show': 'id',
-        'b': 'id', 'bump': 'id',
-        'a': 'special', 'add': 'special', 'new': 'special',
-        'help': 'special', '-h': 'special', '--help': 'special'
-    }
-
-    if len(sys.argv) > 1:
-        first_arg = sys.argv[1]
-        should_inject_add = False
-        if first_arg not in COMMAND_SPECS:
-            if not first_arg.startswith('-'):
-                should_inject_add = True
-        else:
-            spec = COMMAND_SPECS[first_arg]
-            if spec == 'id':
-                if len(sys.argv) > 2 and not sys.argv[2].isdigit():
-                    if not sys.argv[2].startswith('-'):
-                        should_inject_add = True
-            elif spec is None:
-                if len(sys.argv) > 2 and not sys.argv[2].startswith('-'):
-                    should_inject_add = True
-        if should_inject_add:
-            sys.argv.insert(1, 'a')
-
+    _maybe_inject_add(parser)
     args = parser.parse_args()
     conn = get_connection()
     try:
@@ -436,6 +336,7 @@ Commands:
             parser.print_help()
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     main()

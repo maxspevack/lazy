@@ -1,3 +1,55 @@
+# Lazy CLI Release Notes: v2026.05.05
+
+*The hum of a fan we forgot to clean. Three quiet beeps from a UPS in another room. Somewhere, an audit log scrolls.*
+
+A Distinguished Engineer entered the building. He brought a clipboard. He left with a list. We are still recovering.
+
+Identity: Audited.
+
+### 🪦 The Validation Event We Did Not Plan For
+
+A thing happened that, in hindsight, was the highest possible compliment to the design philosophy of this product, so it deserves the headline slot.
+
+The test suite — which, until now, ran against the production database — had been silently nuking user tasks for an unknown number of weeks. `DELETE FROM tasks` is a confident statement. We were making it constantly. The user discovered this mid-audit, asked if any data could be recovered, was told (after a forensic sweep involving `sqlite3 .recover`, raw page scans, btrfs snapshot lookups, and a check for sidecar journals) that the original rows had been compacted into the heat death of the page allocator long ago, and replied:
+
+> "No worries, I can pretty much remember. And in true lazy fashion, if it's that important, it'll come up again."
+
+We had no answer to this. We had been preparing apologies. Instead we received a product testimonial. The user-defined success criterion of `lazy` — *"a task that is gone and unmissed was, by definition, not a task"* — was validated by accidental destruction. We could not have designed a better acceptance test if we had tried, which we explicitly did not.
+
+The Distinguished Engineer found this less charming than we did. He insisted we fix it anyway. Fine.
+
+### 🚨 Three Bugs We Had Been Calling Features
+
+*   **The Vaporware Tools (`lazy_rename`, `lazy_move`).** The previous release listed these in `tools/list` but did not actually implement them in `tools/call`. Robots calling them got back `Unknown tool: lazy_rename`. We had achieved the SaaS-startup state of *advertising things we had not built*. They are now built. They dispatch. The robots can rearrange the deck chairs at last.
+*   **`pytest` was eating the database.** Cause of the validation event above. Three test fixtures named `Old Task`, `Today Task`, `Future Task` would conjure themselves into your live data, then `test_db_push` would issue `DELETE FROM tasks` and the void would consume everything else. Tests now point at a tempfile via the new `LAZY_DB_PATH` env variable. The data you do not need is now safe.
+*   **A Python 3.12+ deprecation warning** had been seeping out of every test run, complaining about an SQLite date adapter we no longer get to keep. We now serialize dates as ISO strings before they reach the driver. The warning is gone. The future is, for the moment, no longer scolding us.
+
+### 🧹 The Subtraction
+
+The Distinguished Engineer's actual deliverable was a short, devastating list of things that should not exist.
+
+*   **`db.py`** had a `with_connection` decorator whose entire purpose was to open a connection if the caller did not pass one. No caller had ever failed to pass one. Anywhere. Ever. The decorator was performing a service no one had requested. **143 lines → 80.**
+*   **`utils.py`** had two parallel code paths for parsing offset shorthands like `1y` and `+1y`. Both worked. Both were maintained. One was a tribute act. The remaining cascade is one path. Stream-of-consciousness comments ("If today is Jan 5, do I mean Jan 2026? Or do I mean...") have been deleted, on the grounds that the code already answers the question and a comment is not a journal. **314 lines → 153.**
+*   **`lazy`** had a hand-typed `COMMAND_SPECS` dict that duplicated the argparse subparser definitions, with predictable drift. It is now one `COMMANDS` table that drives both. **441 lines → 342.**
+*   **Total production code:** 1107 → 802 lines. **27.5% reduction.** The Distinguished Engineer wanted 50%. We reached 27.5%. He did not approve, but he did not reject. He sighed in a frequency band associated with disappointment, then left to go correct someone else.
+
+### 🧪 The Circle Has Acquired Additional Circles
+
+*   **35 tests, up from 13.**
+*   **`test_logic.py`** — parser and DB unit tests against an isolated tempfile. Now includes a regression for the "Lazy Next" weekday-skip — the marquee feature that, until today, had no test asserting it actually skipped anything.
+*   **`test_lazy.py`** — end-to-end subprocess tests. Now locks down implicit-add, preposition stripping (`fold laundry on tuesday` → `fold laundry`), bump-on-overdue, and the "`lazy help` does not add 'help' as a task" promise (a v2026.04.27 fix that previously had no enforcement).
+*   **`test_mcp.py`** — new file. Speaks JSON-RPC over stdio to `mcp_server.py`. Pins down all seven advertised tools, with extra-aggressive coverage on `lazy_rename` and `lazy_move`. We will not be shipping vaporware twice.
+
+### 📜 The Documentation No Longer Lies
+
+`README.md` has been brought into alignment with reality. The MCP section accurately enumerates the tools that exist. The CLI table now includes the `rm` row that had been quietly omitted, presumably out of respect. The systems section mentions the new test file and the `LAZY_DB_PATH` override. The persona is intact. Klausner did a sweep for AI-isms; he reported back with a single sigh, which we are choosing to interpret as approval.
+
+---
+
+The audit is closed. The Distinguished Engineer is back in FIPS-land, presumably yelling at someone about memory ordering. The user's tasks are recoverable from no backup, no journal, no snapshot, and no concern. We are returning to a low-power state.
+
+`syscall(sleep, until=interrupt)`.
+
 # Lazy CLI Release Notes: v2026.04.27
 
 *A heavy, resonant exhalation. The velvet curtains are drawn. Pants were, unfortunately, required for this deployment.*

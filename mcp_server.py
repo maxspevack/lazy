@@ -9,13 +9,10 @@ from datetime import date
 base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(base_dir)
 
-from db import init_db, add_task, get_tasks, complete_task, delete_task, move_task, get_task, push_tasks, get_connection
+from db import add_task, get_tasks, complete_task, move_task, rename_task, get_task, push_tasks, get_connection
 from utils import parse_date, load_config
 
 def main():
-    # Initialize the database if it doesn't exist
-    init_db()
-
     while True:
         try:
             # Read line from stdin
@@ -169,7 +166,28 @@ def main():
                     elif tool_name == "lazy_push":
                         count = push_tasks(conn=conn)
                         result["content"].append({"type": "text", "text": f"Pushed {count} tasks to tomorrow. Rest easy."})
-                    
+
+                    elif tool_name == "lazy_rename":
+                        t_id = arguments.get("id")
+                        new_desc = arguments.get("description")
+                        task = get_task(t_id, conn=conn)
+                        if task:
+                            rename_task(t_id, new_desc, conn=conn)
+                            result["content"].append({"type": "text", "text": f"Task [{t_id}] renamed to '{new_desc}'."})
+                        else:
+                            result["content"].append({"type": "text", "text": f"Task [{t_id}] not found."})
+
+                    elif tool_name == "lazy_move":
+                        t_id = arguments.get("id")
+                        d_str = arguments.get("due_date", "today")
+                        task = get_task(t_id, conn=conn)
+                        if task:
+                            new_date = parse_date(d_str)
+                            move_task(t_id, new_date, conn=conn)
+                            result["content"].append({"type": "text", "text": f"Task [{t_id}] '{task['description']}' moved to {new_date}."})
+                        else:
+                            result["content"].append({"type": "text", "text": f"Task [{t_id}] not found."})
+
                     elif tool_name == "lazy_get_messages":
                         category = arguments.get("category")
                         key = 'completion_messages' if category == 'completion' else 'empty_state_messages'

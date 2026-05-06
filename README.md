@@ -19,8 +19,9 @@ It’s the elite way to procrastinate. The robots do the tracking; you do the re
 - `lazy_list`: Gaze into the abyss of your obligations.
 - `lazy_done`: Receive brand-aligned validation for the bare minimum.
 - `lazy_push`: The Global Panic Button. Instant relief.
-- `lazy_rename`: Revisionist History. Change the past until it’s less tiring.
+- `lazy_rename`: Revisionist history. Edit the past until it’s less tiring.
 - `lazy_move`: Reschedule the inevitable.
+- `lazy_get_messages`: Audit the brand. Inspect the LulzCorp catechism.
 
 ---
 
@@ -44,7 +45,7 @@ lazy Reorganize the chaise 2w            # 2 weeks from now
 lazy Check if I still have a pulse 1m    # 1 month from now
 lazy cancel gym eventually               # +30 days (standard procrastination)
 ```
-*Result:* `lazy` figures out what is the task and what is the date. It’s smarter than I am, which isn't saying much today.
+*Result:* `lazy` figures out what is the task and what is the date. It’s smarter than I am, which isn't saying much today. Trailing prepositions (`on`, `at`, `in`, `for`) get quietly stripped, so `lazy fold laundry on tuesday` stores `fold laundry`, not `fold laundry on`.
 
 ### 📖 High-Status Rituals
 
@@ -53,14 +54,14 @@ Are there too many things on today's list? Do you feel the friction of reality? 
 ```bash
 lazy push
 ```
-*(Alias: `p`)*. Instantly moves everything due today to tomorrow. It’s the closest thing to a "Delete Reality" button we have.
+*(Alias: `p`)*. Instantly moves everything due today (and overdue) to tomorrow. It’s the closest thing to a "Delete Reality" button we have.
 
 #### 2. The "Not Today" Button (The Bump)
 Just one annoying task you want to ignore? Bump it.
 ```bash
 lazy bump <id>
 ```
-*(Alias: `b`)*. Moves a specific task to **Tomorrow**. If no ID is provided, it bumps the first item on the list.
+*(Alias: `b`)*. Moves a specific task to **Tomorrow**. If no ID is provided, it bumps the first item on today's list. Bumping an *overdue* task lands tomorrow, not yesterday-plus-one. Whoever wrote the original logic was thinking ahead. I won’t name names.
 
 #### 3. Do ONE Thing (The Focus Lens)
 If you're being forced to work, just look at **one** thing. Looking at the whole list is a health hazard.
@@ -72,6 +73,13 @@ lazy focus
 #### 4. Revisionist History (Editing the Past)
 - **`lazy rename <id> <text>`**: Change a description to suit your current state of inertia. (Aliases: `rn`, `re`, `edit`).
 - **`lazy view <id>`**: Isolate a single task to study it in its lonely glory. (Aliases: `v`, `show`).
+- **`lazy rm <id>`**: Permanently obliterate a task. (Aliases: `remove`, `del`, `delete`). Use sparingly. Deletion is for tasks so embarrassing they cannot be allowed to persist in the audit trail.
+
+#### 5. Triage (For the Forced March)
+```bash
+lazy triage
+```
+*(Alias: `t`)*. Single-key interactive loop over today's list: `(d)`one, `(b)`ump, `(p)`ush all, `(s)`kip, `(q)`uit. The minimum-friction path through the obligations you couldn't avoid.
 
 ---
 
@@ -85,7 +93,8 @@ I'm only writing this table once. Please don't make me do it again.
 | `lazy l` | `list`, `ls` | Shows the entire scroll of judgment (sorted). |
 | `lazy <text>` | `a`, `add`, `new` | Add a task. Or don't. I'm not your boss. |
 | `lazy d <id>` | `done` | Mark it done. Get a gold star. Go back to sleep. |
-| `lazy m <id> <date>` | `mv`, `move` | Reschedule. Natural language (tmw, fri) supported. |
+| `lazy rm <id>` | `remove`, `del`, `delete` | Obliterate. The void accepts your offering. |
+| `lazy m <id> <date>` | `mv`, `move`, `reschedule` | Reschedule. Natural language (tmw, fri) supported. |
 | `lazy rn <id> <text>` | `re`, `rename`, `edit` | Rename. Because you misspoke earlier. |
 | `lazy v <id>` | `view`, `show` | View details. For when the description is a novel. |
 | `lazy b [id]` | `bump` | Pushes one task to tomorrow. |
@@ -101,19 +110,27 @@ I'm only writing this table once. Please don't make me do it again.
 "Next Friday" is a feeling. The **"Lazy Next" Algorithm** knows that. Standard calendars are for people who like meetings; `lazy` is for people who like naps.
 
 ### The Liturgy of Keywords:
-- **Relative:** `today` (`tod`), `tomorrow` (`tmw`, `tom`).
+- **Relative:** `today` (`tod`), `tomorrow` (`tmw`, `tom`), `yesterday`.
 - **Offsets:** `+1`, `2w`, `3m`, `1y` (works with or without the `+`).
+- **Fuzzy:** `in 3 days`, `5 days`, `in 2 weeks`, `2 months`. As if you can't be bothered with the pluses.
 - **The "Lazy Next":** `next fri` skips the one coming up too fast and picks the one after.
-- **Milestones:** `eow` (End of Week), `eom` (End of Month), `eoy` (End of Year).
-- **Vague Potentials:** `soon` (+3d), `later` (+7d), `someday` / `eventually` (+1m).
+- **Milestones:** `eow` (End of Week → Friday), `eom` (End of Month), `eoy` (End of Year).
+- **Weekend Logic:** `weekend` / `this weekend` (next Saturday), `next weekend` (the Saturday after that).
+- **Calendar Drift:** `next week`, `next month`, `next year`.
+- **Months:** `jan` … `dec` (full or short) → 1st of the next occurrence.
+- **Vague Potentials:** `soon` (+3d), `later` (+7d), `someday` / `eventually` (+30d).
+- **Explicit:** `2026-12-17`, `12-17`, `12/17`, `17.12`. For when "soon" feels too aggressive.
+
+If `parse_date` can't make sense of a string, it raises a `ValueError`. The CLI catches it and prints the error. Your faith remains intact.
 
 ---
 
 ## ⚙️ The Boring Stuff (Systems)
 
-- **Persistence:** Uses **SQLite** (`lazy.db`). Your tasks survive a reboot. My motivation doesn't.
-- **Verification:** There’s a test suite (`test_lazy.py`). Run it if you're bored.
-- **Config:** `lazy/config.json`. You can change the colors and the sarcastic messages. 
+- **Persistence:** Uses **SQLite** (`lazy.db`, next to the script). Your tasks survive a reboot. My motivation doesn't.
+- **DB override:** Set `LAZY_DB_PATH=/some/path` to redirect the database. The test suite uses this to avoid eating your real tasks. Yes, that *was* a bug. Yes, it's fixed.
+- **Verification:** Three test files. `test_logic.py` (parser + DB unit), `test_lazy.py` (end-to-end CLI subprocess), `test_mcp.py` (JSON-RPC over stdio). `python3 -m pytest`. Run them if you're bored. They use a tempfile DB and won't touch yours.
+- **Config:** `lazy/config.json`. You can change the colors and the sarcastic messages. The schema is: `enable_colors` (bool), `completion_messages` (list[str]), `empty_state_messages` (list[str]), `add_echo_messages` (list[str], with `{description}` and `{date}` placeholders).
 
 ---
 
