@@ -1,11 +1,18 @@
 """End-to-end CLI tests via subprocess. Slow but exercises argparse + dispatch."""
 
+import json
 import os
-import sqlite3
+import shutil
 import subprocess
 import tempfile
 import unittest
 from datetime import date, timedelta
+
+
+def _setup_repo(path):
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=path, check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=path, check=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=path, check=True)
 
 
 class TestLazyCLI(unittest.TestCase):
@@ -14,13 +21,16 @@ class TestLazyCLI(unittest.TestCase):
         cls.lazy_bin = os.path.join(os.path.dirname(__file__), 'lazy')
 
     def setUp(self):
-        fd, self.db_path = tempfile.mkstemp(prefix='lazy-cli-test-', suffix='.db')
-        os.close(fd)
-        self.env = {**os.environ, 'LAZY_DB_PATH': self.db_path}
+        self.repo_path = tempfile.mkdtemp(prefix='lazy-cli-test-')
+        _setup_repo(self.repo_path)
+        self.env = {
+            **os.environ,
+            'LAZY_HOME': self.repo_path,
+            'LAZY_NO_REMOTE': '1',
+        }
 
     def tearDown(self):
-        if os.path.exists(self.db_path):
-            os.unlink(self.db_path)
+        shutil.rmtree(self.repo_path, ignore_errors=True)
 
     def run_lazy(self, *args):
         return subprocess.run(
@@ -28,16 +38,25 @@ class TestLazyCLI(unittest.TestCase):
             capture_output=True, text=True, env=self.env
         )
 
+    def read_tasks(self):
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        if not os.path.exists(path):
+            return []
+        out = []
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    obj = json.loads(line)
+                    if 'id' in obj:
+                        out.append(obj)
+        return out
+
     def latest_id(self, description):
-        conn = sqlite3.connect(self.db_path)
-        try:
-            row = conn.execute(
-                "SELECT id FROM tasks WHERE description = ? ORDER BY id DESC LIMIT 1",
-                (description,)
-            ).fetchone()
-            return row[0] if row else None
-        finally:
-            conn.close()
+        for t in reversed(self.read_tasks()):
+            if t['description'] == description:
+                return t['id']
+        return None
 
     def test_add_then_list(self):
         self.run_lazy("a", "Test alpha", "today")
@@ -52,11 +71,7 @@ class TestLazyCLI(unittest.TestCase):
     def test_implicit_add_strips_trailing_preposition(self):
         """'fold laundry on tuesday' should store 'fold laundry', not 'fold laundry on'."""
         self.run_lazy("fold laundry", "on", "tuesday")
-        conn = sqlite3.connect(self.db_path)
-        try:
-            descs = [r[0] for r in conn.execute("SELECT description FROM tasks").fetchall()]
-        finally:
-            conn.close()
+        descs = [t['description'] for t in self.read_tasks()]
         self.assertIn("fold laundry", descs)
         for d in descs:
             self.assertFalse(d.endswith(" on"), f"preposition not stripped: {d!r}")
@@ -65,12 +80,8 @@ class TestLazyCLI(unittest.TestCase):
         self.run_lazy("a", "kill it", "today")
         tid = self.latest_id("kill it")
         self.run_lazy("d", str(tid))
-        conn = sqlite3.connect(self.db_path)
-        try:
-            status = conn.execute("SELECT status FROM tasks WHERE id=?", (tid,)).fetchone()[0]
-        finally:
-            conn.close()
-        self.assertEqual(status, 'done')
+        task = next(t for t in self.read_tasks() if t['id'] == tid)
+        self.assertEqual(task['status'], 'done')
 
     def test_rename(self):
         self.run_lazy("a", "Original", "today")
@@ -96,23 +107,25 @@ class TestLazyCLI(unittest.TestCase):
 
     def test_bump_overdue_goes_to_tomorrow(self):
         """Bumping an overdue task should land tomorrow, not yesterday+1."""
-        conn = sqlite3.connect(self.db_path)
-        try:
-            yesterday = (date.today() - timedelta(days=1)).isoformat()
-            conn.execute("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, description TEXT NOT NULL, due_date DATE NOT NULL, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-            conn.execute("INSERT INTO tasks (description, due_date) VALUES (?, ?)", ("late", yesterday))
-            conn.commit()
-            tid = conn.execute("SELECT id FROM tasks WHERE description='late'").fetchone()[0]
-        finally:
-            conn.close()
-        self.run_lazy("b", str(tid))
-        conn = sqlite3.connect(self.db_path)
-        try:
-            new_date = conn.execute("SELECT due_date FROM tasks WHERE id=?", (tid,)).fetchone()[0]
-        finally:
-            conn.close()
+        # Seed an overdue task by writing tasks.jsonl directly
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        with open(path, 'w') as f:
+            f.write(json.dumps({
+                'id': 1,
+                'description': 'late',
+                'due_date': yesterday,
+                'status': 'pending',
+                'created_at': '2026-01-01T00:00:00Z',
+            }) + '\n')
+        # Commit so the store sees a clean state
+        subprocess.run(['git', 'add', 'tasks.jsonl'], cwd=self.repo_path, check=True)
+        subprocess.run(['git', 'commit', '-q', '-m', 'seed'], cwd=self.repo_path, check=True)
+
+        self.run_lazy("b", "1")
+        task = next(t for t in self.read_tasks() if t['id'] == 1)
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        self.assertEqual(new_date, tomorrow)
+        self.assertEqual(task['due_date'], tomorrow)
 
     def test_help_alias(self):
         out = self.run_lazy("help").stdout
@@ -123,11 +136,7 @@ class TestLazyCLI(unittest.TestCase):
         """RELEASE_NOTES claims this was fixed in v2026.04.27."""
         self.run_lazy("a", "seed", "today")
         self.run_lazy("help")
-        conn = sqlite3.connect(self.db_path)
-        try:
-            descs = [r[0] for r in conn.execute("SELECT description FROM tasks").fetchall()]
-        finally:
-            conn.close()
+        descs = [t['description'] for t in self.read_tasks()]
         self.assertNotIn("help", descs)
         self.assertEqual(len(descs), 1)
 

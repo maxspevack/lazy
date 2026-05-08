@@ -2,10 +2,17 @@
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
 from datetime import date, timedelta
+
+
+def _setup_repo(path):
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=path, check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=path, check=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=path, check=True)
 
 
 class TestMCP(unittest.TestCase):
@@ -14,16 +21,18 @@ class TestMCP(unittest.TestCase):
         cls.server = os.path.join(os.path.dirname(__file__), 'mcp_server.py')
 
     def setUp(self):
-        fd, self.db_path = tempfile.mkstemp(prefix='lazy-mcp-test-', suffix='.db')
-        os.close(fd)
-        self.env = {**os.environ, 'LAZY_DB_PATH': self.db_path}
+        self.repo_path = tempfile.mkdtemp(prefix='lazy-mcp-test-')
+        _setup_repo(self.repo_path)
+        self.env = {
+            **os.environ,
+            'LAZY_HOME': self.repo_path,
+            'LAZY_NO_REMOTE': '1',
+        }
 
     def tearDown(self):
-        if os.path.exists(self.db_path):
-            os.unlink(self.db_path)
+        shutil.rmtree(self.repo_path, ignore_errors=True)
 
     def _exchange(self, requests):
-        """Send a list of JSON-RPC requests, return parsed responses."""
         payload = "\n".join(json.dumps(r) for r in requests) + "\n"
         proc = subprocess.run(
             ['python3', self.server],
@@ -36,7 +45,6 @@ class TestMCP(unittest.TestCase):
         return responses
 
     def _call_tool(self, name, arguments=None):
-        """Single tools/call helper. Returns the result dict."""
         responses = self._exchange([
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
              "params": {"name": name, "arguments": arguments or {}}}

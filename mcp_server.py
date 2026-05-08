@@ -3,27 +3,25 @@ import json
 import sys
 import os
 import random
-from datetime import date
 
-# Add the lazy directory to the path so we can import db and utils
 base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(base_dir)
 
-from db import add_task, get_tasks, complete_task, move_task, rename_task, get_task, push_tasks, get_connection
+from store import open_store, StoreNotInitialized
 from utils import parse_date, load_config
+
 
 def main():
     while True:
         try:
-            # Read line from stdin
             line = sys.stdin.readline()
             if not line:
                 break
-            
+
             request = json.loads(line)
             method = request.get("method")
             req_id = request.get("id")
-            
+
             # MCP specification: Notifications do not have an ID and MUST NOT be responded to.
             if req_id is None:
                 continue
@@ -31,19 +29,11 @@ def main():
             response_result = None
             response_error = None
 
-            # Simple stdio MCP protocol handling
             if method == "initialize":
                 response_result = {
                     "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {
-                            "list": True
-                        }
-                    },
-                    "serverInfo": {
-                        "name": "lazy-mcp",
-                        "version": "1.0.0"
-                    }
+                    "capabilities": {"tools": {"list": True}},
+                    "serverInfo": {"name": "lazy-mcp", "version": "1.0.0"}
                 }
             elif method == "tools/list":
                 response_result = {
@@ -75,9 +65,7 @@ def main():
                             "description": "Mark a task as complete by its ID.",
                             "inputSchema": {
                                 "type": "object",
-                                "properties": {
-                                    "id": {"type": "integer", "description": "The task ID"}
-                                },
+                                "properties": {"id": {"type": "integer", "description": "The task ID"}},
                                 "required": ["id"]
                             }
                         },
@@ -118,7 +106,7 @@ def main():
                                 "properties": {
                                     "category": {"type": "string", "enum": ["completion", "empty"], "description": "Message category"}
                                 },
-                                    "required": ["category"]
+                                "required": ["category"]
                             }
                         }
                     ]
@@ -127,52 +115,70 @@ def main():
                 params = request.get("params", {})
                 tool_name = params.get("name")
                 arguments = params.get("arguments", {})
-                
+
                 result = {"content": []}
-                
-                conn = get_connection()
-                try:
-                    config = load_config()
+                config = load_config()
+
+                # lazy_get_messages doesn't need the store
+                if tool_name == "lazy_get_messages":
+                    category = arguments.get("category")
+                    key = 'completion_messages' if category == 'completion' else 'empty_state_messages'
+                    messages = config.get(key, [])
+                    output = "\n".join([f"- {m}" for m in messages])
+                    result["content"].append({"type": "text", "text": f"LulzCorp Brand Messages ({category}):\n\n{output}"})
+                    response_result = result
+                else:
+                    try:
+                        store = open_store()
+                    except StoreNotInitialized as e:
+                        result = {"isError": True, "content": [{"type": "text", "text": str(e)}]}
+                        response_result = result
+                        # send response and continue loop
+                        response = {"jsonrpc": "2.0", "id": req_id, "result": response_result}
+                        sys.stdout.write(json.dumps(response) + "\n")
+                        sys.stdout.flush()
+                        continue
+
                     if tool_name == "lazy_add":
                         desc = arguments.get("description")
                         d_str = arguments.get("due_date", "today")
                         d_date = parse_date(d_str)
-                        new_id = add_task(desc, d_date, conn=conn)
+                        new_id = store.add_task(desc, d_date)
                         result["content"].append({"type": "text", "text": f"Added task [{new_id}] '{desc}' for {d_date}."})
-                    
+
                     elif tool_name == "lazy_list":
                         mode = arguments.get("mode", "today")
-                        tasks = get_tasks(mode, conn=conn)
+                        tasks = store.get_tasks(mode)
                         if not tasks:
                             messages = config.get('empty_state_messages', ["Nothing to do!"])
                             result["content"].append({"type": "text", "text": f"✨ {random.choice(messages)}"})
                         else:
-                            output = "ID | Due Date | Description\n" + "-"*30 + "\n"
+                            output = "ID | Due Date | Description\n" + "-" * 30 + "\n"
                             for t in tasks:
                                 output += f"{t['id']:<3} | {t['due_date']} | {t['description']}\n"
                             result["content"].append({"type": "text", "text": output})
-                    
+
                     elif tool_name == "lazy_done":
                         t_id = arguments.get("id")
-                        task = get_task(t_id, conn=conn)
+                        task = store.get_task(t_id)
                         if task:
-                            complete_task(t_id, conn=conn)
+                            store.complete_task(t_id)
                             praises = config.get('completion_messages', ["Done."])
                             praise = random.choice(praises)
                             result["content"].append({"type": "text", "text": f"Task [{t_id}] '{task['description']}' marked as done.\n\n✨ {praise}"})
                         else:
                             result["content"].append({"type": "text", "text": f"Task [{t_id}] not found."})
-                    
+
                     elif tool_name == "lazy_push":
-                        count = push_tasks(conn=conn)
+                        count = store.push_tasks()
                         result["content"].append({"type": "text", "text": f"Pushed {count} tasks to tomorrow. Rest easy."})
 
                     elif tool_name == "lazy_rename":
                         t_id = arguments.get("id")
                         new_desc = arguments.get("description")
-                        task = get_task(t_id, conn=conn)
+                        task = store.get_task(t_id)
                         if task:
-                            rename_task(t_id, new_desc, conn=conn)
+                            store.rename_task(t_id, new_desc)
                             result["content"].append({"type": "text", "text": f"Task [{t_id}] renamed to '{new_desc}'."})
                         else:
                             result["content"].append({"type": "text", "text": f"Task [{t_id}] not found."})
@@ -180,48 +186,38 @@ def main():
                     elif tool_name == "lazy_move":
                         t_id = arguments.get("id")
                         d_str = arguments.get("due_date", "today")
-                        task = get_task(t_id, conn=conn)
+                        task = store.get_task(t_id)
                         if task:
                             new_date = parse_date(d_str)
-                            move_task(t_id, new_date, conn=conn)
+                            store.move_task(t_id, new_date)
                             result["content"].append({"type": "text", "text": f"Task [{t_id}] '{task['description']}' moved to {new_date}."})
                         else:
                             result["content"].append({"type": "text", "text": f"Task [{t_id}] not found."})
 
-                    elif tool_name == "lazy_get_messages":
-                        category = arguments.get("category")
-                        key = 'completion_messages' if category == 'completion' else 'empty_state_messages'
-                        messages = config.get(key, [])
-                        output = "\n".join([f"- {m}" for m in messages])
-                        result["content"].append({"type": "text", "text": f"LulzCorp Brand Messages ({category}):\n\n{output}"})
-
                     else:
                         result = {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}]}
-                finally:
-                    conn.close()
-                response_result = result
+                    response_result = result
             else:
                 response_error = {"code": -32601, "message": f"Method not found: {method}"}
-            
-            # Send response if not a notification
+
             response = {"jsonrpc": "2.0", "id": req_id}
             if response_result is not None:
                 response["result"] = response_result
             elif response_error is not None:
                 response["error"] = response_error
-            
+
             sys.stdout.write(json.dumps(response) + "\n")
             sys.stdout.flush()
-            
+
         except Exception as e:
-            # MCP errors should be returned as JSON-RPC error objects
             err_response = {
                 "jsonrpc": "2.0",
-                "id": None, # This is technically incorrect for a request, but safe for a crash
+                "id": None,
                 "error": {"code": -32603, "message": str(e)}
             }
             sys.stdout.write(json.dumps(err_response) + "\n")
             sys.stdout.flush()
+
 
 if __name__ == "__main__":
     main()

@@ -4,15 +4,16 @@
 Philosophy: "Why do today what you can push to tomorrow?"
 """
 
-__version__ = "v2026.05.05"
+__version__ = "v2026.05.08"
 
 import argparse
+import json
+import os
 import random
 import sys
 from datetime import date, timedelta
 
-from db import (add_task, complete_task, delete_task, get_connection, get_task,
-                get_tasks, move_task, push_tasks, rename_task)
+from store import open_store, StoreNotInitialized
 from utils import get_vibe_echo, load_config, parse_date
 
 RED, GREEN, GRAY, BOLD, RESET = "\033[91m", "\033[92m", "\033[90m", "\033[1m", "\033[0m"
@@ -66,21 +67,21 @@ def _split_description_and_date(words):
     return " ".join(words).strip(), date.today()
 
 
-def cmd_add(args, conn):
+def cmd_add(args, store):
     if not args.task_input:
         print("Error: Description required.")
         sys.exit(1)
     description, due = _split_description_and_date(args.task_input)
-    new_id = add_task(description, due, conn)
+    new_id = store.add_task(description, due)
     print(f"[{new_id}] {get_vibe_echo(description, due)}")
 
 
-def cmd_list(args, conn):
-    print_tasks(get_tasks('all', conn), show_date=True)
+def cmd_list(args, store):
+    print_tasks(store.get_tasks('all'), show_date=True)
 
 
-def cmd_one(args, conn):
-    tasks = get_tasks('all', conn)
+def cmd_one(args, store):
+    tasks = store.get_tasks('all')
     if not tasks:
         print_tasks(tasks)
         return
@@ -94,28 +95,28 @@ def cmd_one(args, conn):
     print(f"\n{bar}\n")
 
 
-def cmd_done(args, conn):
-    task = get_task(args.id, conn)
+def cmd_done(args, store):
+    task = store.get_task(args.id)
     if not task:
         print(f"Task [{args.id}] not found.")
         return
-    complete_task(args.id, conn)
+    store.complete_task(args.id)
     praises = load_config().get('completion_messages', ["Completed."])
     print(f"[{args.id}] {task['description']} -> DONE.")
     print(f"✨ {random.choice(praises)}")
 
 
-def cmd_remove(args, conn):
-    task = get_task(args.id, conn)
+def cmd_remove(args, store):
+    task = store.get_task(args.id)
     if not task:
         print(f"Task [{args.id}] not found.")
         return
-    delete_task(args.id, conn)
+    store.delete_task(args.id)
     print(f"Deleted [{args.id}] \"{task['description']}\".")
 
 
-def cmd_move(args, conn):
-    task = get_task(args.id, conn)
+def cmd_move(args, store):
+    task = store.get_task(args.id)
     if not task:
         print(f"Task [{args.id}] not found.")
         return
@@ -124,12 +125,12 @@ def cmd_move(args, conn):
     except ValueError as e:
         print(f"Error: {e}")
         return
-    move_task(args.id, new_date, conn)
+    store.move_task(args.id, new_date)
     print(f"Moved [{args.id}] \"{task['description']}\" to {new_date}.")
 
 
-def cmd_rename(args, conn):
-    task = get_task(args.id, conn)
+def cmd_rename(args, store):
+    task = store.get_task(args.id)
     if not task:
         print(f"Task [{args.id}] not found.")
         return
@@ -137,12 +138,12 @@ def cmd_rename(args, conn):
     if not new_desc:
         print("Error: New description required.")
         return
-    rename_task(args.id, new_desc, conn)
+    store.rename_task(args.id, new_desc)
     print(f"Renamed [{args.id}] to \"{new_desc}\".")
 
 
-def cmd_view(args, conn):
-    task = get_task(args.id, conn)
+def cmd_view(args, store):
+    task = store.get_task(args.id)
     if not task:
         print(f"Task [{args.id}] not found.")
         return
@@ -151,34 +152,34 @@ def cmd_view(args, conn):
     print(f"Description: {task['description']}")
     print(f"Due Date:    {task['due_date']}")
     print(f"Status:      {task['status']}")
-    print(f"Created At:  {task['created_at']}")
+    print(f"Created At:  {task.get('created_at', '')}")
     print("--------------------\n")
 
 
-def cmd_push(args, conn):
-    count = push_tasks(conn)
+def cmd_push(args, store):
+    count = store.push_tasks()
     print(f"Pushed {count} task(s) to tomorrow. Breathe." if count else "Nothing to push!")
 
 
-def cmd_bump(args, conn):
+def cmd_bump(args, store):
     task_id = args.id
     if task_id is None:
-        tasks = get_tasks('today', conn)
+        tasks = store.get_tasks('today')
         if not tasks:
             print("Nothing to bump!")
             return
         task_id = tasks[0]['id']
-    task = get_task(task_id, conn)
+    task = store.get_task(task_id)
     if not task:
         print(f"Task [{task_id}] not found.")
         return
     current_due = date.fromisoformat(task['due_date'])
     new_date = max(current_due, date.today()) + timedelta(days=1)
-    move_task(task_id, new_date, conn)
+    store.move_task(task_id, new_date)
     print(f"Bumped [{task_id}] to {new_date}.")
 
 
-def cmd_triage(args, conn):
+def cmd_triage(args, store):
     """Interactive single-key triage: (d)one, (b)ump, (p)ush, (s)kip, (q)uit."""
     import termios
     import tty
@@ -192,7 +193,7 @@ def cmd_triage(args, conn):
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    tasks = get_tasks('today', conn)
+    tasks = store.get_tasks('today')
     if not tasks:
         print("No tasks to triage today! Maximum chill.")
         return
@@ -207,15 +208,15 @@ def cmd_triage(args, conn):
             sys.stdout.flush()
             key = get_key().lower()
             if key == 'd':
-                complete_task(task['id'], conn)
+                store.complete_task(task['id'])
                 print(f"{GREEN}DONE{RESET}")
                 break
             if key == 'b':
-                move_task(task['id'], date.today() + timedelta(days=1), conn)
+                store.move_task(task['id'], date.today() + timedelta(days=1))
                 print(f"{GRAY}BUMPED to tomorrow{RESET}")
                 break
             if key == 'p':
-                count = push_tasks(conn)
+                count = store.push_tasks()
                 print(f"\n{GRAY}PUSHED {count} tasks to tomorrow. Triage ending.{RESET}")
                 return
             if key == 's':
@@ -228,9 +229,50 @@ def cmd_triage(args, conn):
     print(f"\n{BOLD}--- TRIAGE COMPLETE ---{RESET}")
 
 
-# Dispatch table: name -> (aliases, takes_id, accepts_extra, func).
-# `takes_id` means the first positional is an integer task ID.
-# `accepts_extra` means the command legitimately consumes trailing words.
+def cmd_sync(args, store):
+    store.sync()
+    print("Sync complete.")
+
+
+def cmd_backend(args):
+    """Print configured backend, repo state, and last-pull info."""
+    import time
+    import git_ops
+    cfg_path = os.path.expanduser('~/.config/lazy/config.json')
+    cfg = {}
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+        except json.JSONDecodeError:
+            pass
+    home = os.environ.get('LAZY_HOME')
+    if home:
+        repo = os.path.expanduser(home)
+        print(f"override:    LAZY_HOME={home}")
+    else:
+        from store import DEFAULT_REPO
+        repo = os.path.expanduser(cfg.get('repo_path', DEFAULT_REPO))
+    print(f"repo:        {repo}")
+    if not git_ops.is_repo(repo):
+        print("status:      not initialized (run `lazy init`)")
+        return
+    if cfg.get('gist_id'):
+        print(f"gist:        {cfg['gist_id']} (https://gist.github.com/{cfg['gist_id']})")
+    sentinel = os.path.join(os.path.dirname(repo) or '.', '.last-pull')
+    try:
+        age = int(time.time() - os.path.getmtime(sentinel))
+        print(f"last pull:   {age}s ago")
+    except FileNotFoundError:
+        print("last pull:   never")
+    tasks_path = os.path.join(repo, 'tasks.jsonl')
+    if os.path.exists(tasks_path):
+        with open(tasks_path) as f:
+            n = sum(1 for line in f if line.strip())
+        print(f"task lines:  {n}")
+
+
+# Dispatch table for the standard CRUD commands.
 COMMANDS = [
     ('a',   ['add', 'new'],            False, True,  cmd_add),
     ('l',   ['list', 'ls'],            False, False, cmd_list),
@@ -243,7 +285,11 @@ COMMANDS = [
     ('p',   ['push'],                  False, False, cmd_push),
     ('b',   ['bump'],                  True,  False, cmd_bump),
     ('t',   ['triage'],                False, False, cmd_triage),
+    ('sync', [],                       False, False, cmd_sync),
 ]
+
+# Commands that don't need an open store (they configure / inspect it).
+BOOTSTRAP_COMMANDS = {'init', 'backend', 'migrate-from-sqlite'}
 
 
 def _build_parser():
@@ -263,6 +309,10 @@ Commands:
   p, push                   Push all today's tasks to tomorrow
   1, focus, one             Focus on the single most urgent task
   t, triage                 Interactively process today's tasks
+  sync                      Force pull + push against the gist
+  backend                   Show storage configuration
+  init [--from-gist <id>]   Bootstrap a gist-backed clone
+  migrate-from-sqlite       Migrate an existing lazy.db into the gist
 """
     parser = argparse.ArgumentParser(
         description="Lazy - A Procrastinator's Task Manager",
@@ -283,6 +333,20 @@ Commands:
         elif takes_id:
             sp.add_argument('id', type=int)
         sp.set_defaults(func=func)
+
+    sp = subs.add_parser('init')
+    sp.add_argument('--from-gist', dest='from_gist', metavar='ID',
+                    help='Clone an existing private gist instead of creating one')
+    sp.add_argument('--check', action='store_true',
+                    help='Validate the existing setup')
+
+    sp = subs.add_parser('backend')
+    sp.set_defaults(func=cmd_backend)
+
+    sp = subs.add_parser('migrate-from-sqlite')
+    sp.add_argument('--db', dest='db_path', default=None,
+                    help='Path to lazy.db (default: alongside the lazy script)')
+
     subs.add_parser('help')
     return parser
 
@@ -299,7 +363,6 @@ def _maybe_inject_add(parser):
     if first not in known:
         inject = not first.startswith('-')
     else:
-        # Find the COMMAND row for this name/alias to learn its expected shape.
         row = next(((n, ti, ax) for n, al, ti, ax, _ in COMMANDS
                     if first == n or first in al), None)
         if row and len(sys.argv) > 2 and not sys.argv[2].startswith('-'):
@@ -319,23 +382,39 @@ def main():
     parser = _build_parser()
 
     if len(sys.argv) == 1:
-        conn = get_connection()
         try:
-            print_tasks(get_tasks('today', conn))
-        finally:
-            conn.close()
+            store = open_store()
+        except StoreNotInitialized as e:
+            print(e, file=sys.stderr)
+            sys.exit(1)
+        print_tasks(store.get_tasks('today'))
         return
 
     _maybe_inject_add(parser)
     args = parser.parse_args()
-    conn = get_connection()
-    try:
-        if hasattr(args, 'func'):
-            args.func(args, conn)
+
+    if args.command in BOOTSTRAP_COMMANDS:
+        # init / backend / migrate handle their own config / store creation
+        if args.command == 'init':
+            from cmd_init import cmd_init
+            cmd_init(args)
+        elif args.command == 'migrate-from-sqlite':
+            from cmd_migrate import cmd_migrate
+            cmd_migrate(args)
         else:
-            parser.print_help()
-    finally:
-        conn.close()
+            args.func(args)
+        return
+
+    if not hasattr(args, 'func'):
+        parser.print_help()
+        return
+
+    try:
+        store = open_store()
+    except StoreNotInitialized as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
+    args.func(args, store)
 
 
 if __name__ == "__main__":

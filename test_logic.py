@@ -1,4 +1,7 @@
+import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -7,18 +10,40 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-class IsolatedDB(unittest.TestCase):
-    """Base: routes db calls to a tempfile, importing modules fresh after env is set."""
+def _setup_repo(path):
+    """Create an empty git repo with a configured identity."""
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=path, check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=path, check=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=path, check=True)
+
+
+class IsolatedStore(unittest.TestCase):
+    """Base: routes store calls to a tempdir-backed git repo, no remote."""
 
     def setUp(self):
-        fd, self.db_path = tempfile.mkstemp(prefix='lazy-test-', suffix='.db')
-        os.close(fd)
-        os.environ['LAZY_DB_PATH'] = self.db_path
+        self.repo_path = tempfile.mkdtemp(prefix='lazy-test-')
+        _setup_repo(self.repo_path)
+        os.environ['LAZY_HOME'] = self.repo_path
+        os.environ['LAZY_NO_REMOTE'] = '1'
 
     def tearDown(self):
-        os.environ.pop('LAZY_DB_PATH', None)
-        if os.path.exists(self.db_path):
-            os.unlink(self.db_path)
+        os.environ.pop('LAZY_HOME', None)
+        os.environ.pop('LAZY_NO_REMOTE', None)
+        shutil.rmtree(self.repo_path, ignore_errors=True)
+
+    def read_jsonl(self):
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        if not os.path.exists(path):
+            return []
+        out = []
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    obj = json.loads(line)
+                    if 'id' in obj:
+                        out.append(obj)
+        return out
 
 
 class TestParseDate(unittest.TestCase):
@@ -74,7 +99,6 @@ class TestParseDate(unittest.TestCase):
     def test_lazy_next_skips_current_week(self):
         """README's marquee feature: 'next fri' picks the Friday AFTER this week's."""
         from utils import parse_date
-        today = date.today()
         plain = parse_date("fri")
         nxt = parse_date("next fri")
         self.assertEqual(plain.weekday(), 4)
@@ -101,78 +125,89 @@ class TestVibeEcho(unittest.TestCase):
         self.assertGreater(len(echo), 0)
 
 
-class TestDB(IsolatedDB):
+class TestStore(IsolatedStore):
     def test_add_and_fetch(self):
-        from db import get_connection, add_task, get_task
-        conn = get_connection()
-        try:
-            tid = add_task("hello", date.today(), conn)
-            row = get_task(tid, conn)
-            self.assertEqual(row['description'], "hello")
-            self.assertEqual(row['status'], 'pending')
-        finally:
-            conn.close()
+        from store import open_store
+        store = open_store()
+        tid = store.add_task("hello", date.today())
+        row = store.get_task(tid)
+        self.assertEqual(row['description'], "hello")
+        self.assertEqual(row['status'], 'pending')
 
     def test_complete(self):
-        from db import get_connection, add_task, complete_task, get_task
-        conn = get_connection()
-        try:
-            tid = add_task("done me", date.today(), conn)
-            complete_task(tid, conn)
-            self.assertEqual(get_task(tid, conn)['status'], 'done')
-        finally:
-            conn.close()
+        from store import open_store
+        store = open_store()
+        tid = store.add_task("done me", date.today())
+        store.complete_task(tid)
+        self.assertEqual(store.get_task(tid)['status'], 'done')
 
     def test_get_tasks_today_excludes_future(self):
-        from db import get_connection, add_task, get_tasks
-        conn = get_connection()
-        try:
-            add_task("overdue", date.today() - timedelta(days=1), conn)
-            add_task("today", date.today(), conn)
-            add_task("future", date.today() + timedelta(days=5), conn)
-            today_rows = get_tasks('today', conn)
-            descs = [r['description'] for r in today_rows]
-            self.assertIn("overdue", descs)
-            self.assertIn("today", descs)
-            self.assertNotIn("future", descs)
-            all_rows = get_tasks('all', conn)
-            self.assertEqual(len(all_rows), 3)
-        finally:
-            conn.close()
+        from store import open_store
+        store = open_store()
+        store.add_task("overdue", date.today() - timedelta(days=1))
+        store.add_task("today", date.today())
+        store.add_task("future", date.today() + timedelta(days=5))
+        today_rows = store.get_tasks('today')
+        descs = [r['description'] for r in today_rows]
+        self.assertIn("overdue", descs)
+        self.assertIn("today", descs)
+        self.assertNotIn("future", descs)
+        all_rows = store.get_tasks('all')
+        self.assertEqual(len(all_rows), 3)
 
     def test_push_moves_today_and_overdue_only(self):
-        from db import get_connection, add_task, get_tasks, push_tasks
-        conn = get_connection()
-        try:
-            today = date.today()
-            add_task("Old", today - timedelta(days=1), conn)
-            add_task("Today", today, conn)
-            add_task("Future", today + timedelta(days=1), conn)
-            count = push_tasks(conn)
-            self.assertEqual(count, 2)
-            for t in get_tasks('all', conn):
-                self.assertGreaterEqual(date.fromisoformat(t['due_date']), today + timedelta(days=1))
-        finally:
-            conn.close()
+        from store import open_store
+        store = open_store()
+        today = date.today()
+        store.add_task("Old", today - timedelta(days=1))
+        store.add_task("Today", today)
+        store.add_task("Future", today + timedelta(days=1))
+        count = store.push_tasks()
+        self.assertEqual(count, 2)
+        for t in store.get_tasks('all'):
+            self.assertGreaterEqual(date.fromisoformat(t['due_date']), today + timedelta(days=1))
 
     def test_rename_unknown_id_raises(self):
-        from db import get_connection, rename_task
-        conn = get_connection()
-        try:
-            with self.assertRaises(ValueError):
-                rename_task(99999, "ghost", conn)
-        finally:
-            conn.close()
+        from store import open_store
+        store = open_store()
+        with self.assertRaises(ValueError):
+            store.rename_task(99999, "ghost")
 
     def test_delete(self):
-        from db import get_connection, add_task, delete_task, get_task
-        conn = get_connection()
-        try:
-            tid = add_task("trash", date.today(), conn)
-            delete_task(tid, conn)
-            self.assertIsNone(get_task(tid, conn))
-        finally:
-            conn.close()
+        from store import open_store
+        store = open_store()
+        tid = store.add_task("trash", date.today())
+        store.delete_task(tid)
+        self.assertIsNone(store.get_task(tid))
+
+    def test_metadata_lines_are_skipped(self):
+        """A line without an 'id' field should be silently ignored on read."""
+        from store import open_store
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        with open(path, 'w') as f:
+            f.write('{"_init": true}\n')
+            f.write('{"id":1,"description":"real","due_date":"2030-01-01","status":"pending"}\n')
+        store = open_store()
+        tasks = store.get_tasks('all')
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]['description'], 'real')
+
+    def test_writes_are_committed(self):
+        """After a write, the repo should have a clean working tree (commit happened)."""
+        from store import open_store
+        store = open_store()
+        store.add_task("commit me", date.today())
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            cwd=self.repo_path, capture_output=True, text=True
+        )
+        self.assertEqual(result.stdout.strip(), '',
+                         f"expected clean tree, got: {result.stdout!r}")
+        log = subprocess.run(
+            ['git', 'log', '--oneline'],
+            cwd=self.repo_path, capture_output=True, text=True
+        )
+        self.assertIn("add: commit me", log.stdout)
 
 
 if __name__ == "__main__":

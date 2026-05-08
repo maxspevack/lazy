@@ -1,4 +1,6 @@
 # Lazy CLI ignores
 lazy.db
+lazy.db.migrated
 __pycache__/
 *.pyc
+.pytest_cache/
