@@ -11,11 +11,14 @@ _TIMEOUT = 30
 
 
 def _run(args, cwd):
+    """Returns (ok, output). Output is stdout on success, stderr on failure."""
     try:
         result = subprocess.run(
             args, cwd=cwd, capture_output=True, text=True, timeout=_TIMEOUT
         )
-        return result.returncode == 0, (result.stderr or '').strip()
+        ok = result.returncode == 0
+        out = (result.stdout if ok else result.stderr) or ''
+        return ok, out.strip()
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return False, str(e)
 
@@ -65,3 +68,14 @@ def add_and_commit(path, filename, message):
 
 def push(path):
     return _run(['git', 'push', '-q'], cwd=path)
+
+
+def unpushed_count(path):
+    """Count of local commits ahead of upstream. Zero on any error."""
+    ok, out = _run(['git', 'rev-list', '--count', '@{u}..HEAD'], cwd=path)
+    if not ok:
+        return 0
+    try:
+        return int(out)
+    except ValueError:
+        return 0

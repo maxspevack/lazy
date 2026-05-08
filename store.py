@@ -215,16 +215,23 @@ class Store:
         self._write(tasks)
         self._commit_and_push(message)
 
+    def unpushed_count(self):
+        """Local commits not yet on origin. Used by the CLI to warn."""
+        if self.no_remote or not git_ops.has_remote(self.path):
+            return 0
+        return git_ops.unpushed_count(self.path)
+
     # ---- sync utility ----
 
     def sync(self):
-        """Force pull + push. Used by `lazy sync`."""
+        """Pull (rebasing if needed) + push. Used by `lazy sync`."""
         if self.no_remote or not git_ops.has_remote(self.path):
             _warn("no remote configured; nothing to sync")
             return
-        ok, err = git_ops.pull_ff(self.path)
+        ok, err = git_ops.pull_rebase(self.path)
         if not ok:
-            _warn(f"pull failed ({err})")
+            _warn(f"pull/rebase failed ({err})")
+            _warn(f"  resolve in {self.path}/{TASKS_FILE} then run `lazy sync` again")
             return
         ok, err = git_ops.push(self.path)
         if not ok:
@@ -262,4 +269,5 @@ def open_store():
         repo_path,
         auto_push=cfg.get('auto_push', DEFAULT_AUTO_PUSH),
         pull_freshness=cfg.get('pull_freshness_seconds', DEFAULT_FRESHNESS),
+        no_remote=no_remote,
     )
