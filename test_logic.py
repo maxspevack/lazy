@@ -105,6 +105,25 @@ class TestParseDate(unittest.TestCase):
         self.assertEqual(nxt.weekday(), 4)
         self.assertGreaterEqual((nxt - plain).days, 7)
 
+    def test_next_weekday_always_skips_for_every_starting_day(self):
+        """'next <day>' must be exactly 7 days after '<day>' regardless of
+        today's weekday. Regression: previously returned the same date as
+        '<day>' when today happened to be Friday or Saturday."""
+        from utils import parse_date
+        base = date(2026, 1, 5)  # known Monday
+        days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+        for offset in range(7):
+            today = base + timedelta(days=offset)
+            for day in days:
+                plain = parse_date(day, today=today)
+                nxt = parse_date(f"next {day}", today=today)
+                gap = (nxt - plain).days
+                self.assertEqual(
+                    gap, 7,
+                    f"on {today.strftime('%A')}, '{day}'={plain}, "
+                    f"'next {day}'={nxt}, gap={gap}, expected 7"
+                )
+
     def test_explicit_dates(self):
         from utils import parse_date
         self.assertEqual(parse_date("2025-12-17"), date(2025, 12, 17))

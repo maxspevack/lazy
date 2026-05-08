@@ -73,7 +73,7 @@ _FUZZY_RE = re.compile(r'^(?:in\s+)?(\d+)\s+(day|week|month|year)s?$')
 _EXPLICIT_FORMATS = ['%Y-%m-%d', '%m-%d', '%m/%d', '%d.%m']
 
 
-def parse_date(date_str):
+def parse_date(date_str, today=None):
     """Parse a natural-language date string into a date.
 
     Supports keywords (today/tmw/yesterday/soon/later/someday/eventually),
@@ -82,11 +82,15 @@ def parse_date(date_str):
     weekdays (mon/tue/.../sun, optionally prefixed with 'next' for the
     "Lazy Next" skip-this-week behavior), month names (jan/january/...),
     and explicit dates (YYYY-MM-DD, MM-DD, M/D, D.M).
-    """
-    if not date_str:
-        return date.today()
 
-    today = date.today()
+    today is the reference date; defaults to date.today(). Exposed for tests
+    so behavior at specific weekdays can be verified deterministically.
+    """
+    if today is None:
+        today = date.today()
+    if not date_str:
+        return today
+
     s = date_str.lower().strip()
 
     if s in _KEYWORDS:
@@ -135,8 +139,10 @@ def parse_date(date_str):
     bare = s[5:] if is_next else s
     for idx, day in enumerate(_WEEKDAYS):
         if bare.startswith(day):
+            # Plain '<day>' = next occurrence (1-7 days ahead).
+            # 'next <day>' = skip the upcoming one, get the week after.
             days_ahead = (idx - today.weekday()) % 7 or 7
-            if is_next and (today.weekday() == 6 or idx > today.weekday()):
+            if is_next:
                 days_ahead += 7
             return today + timedelta(days=days_ahead)
 
