@@ -285,6 +285,15 @@ Run on whichever machine has the canonical SQLite file. Other machines
 | Corrupted JSONL line | Skip line, warn on stderr (don't crash the list) |
 | Local repo missing | `lazy init --from-gist <configured-id>` re-clones |
 
+### 10a. Data rollback
+
+Two tiers, in order of precision:
+
+1. **Git history of the local clone.** Every lazy operation since migration is a commit. To revert to a pre-corruption state: `git -C ~/.local/share/lazy/repo log --oneline` to find the last good SHA, then `git reset --hard <sha> && git push --force-with-lease`. You lose only what was added between the bad commit and discovery, not the entire migration.
+2. **The SQLite snapshot.** `~/gemini/lazy/lazy.db.migrated` is the frozen state from migration day (2026-05-08). To return to the SQLite-era code and data: `git checkout v2026.05.05 && mv ~/gemini/lazy/lazy.db.migrated ~/gemini/lazy/lazy.db`. You lose everything added since 2026-05-08, but you also lose the new failure modes that came with the gist storage.
+
+The first tier is the precision tool. The second tier is the floor. The floor disappears the day you delete `lazy.db.migrated`; until then it's there as paranoia tax.
+
 ## 11. Phased plan
 
 ### Phase 1 — Storage rewrite

@@ -1,3 +1,78 @@
+# Lazy CLI Release Notes: v2026.05.08
+
+*A second laptop, opened in another room, and the same task list was already there. Nobody touched anything. We are not entirely sure how this is supposed to feel.*
+
+The user demanded the impossible and the impossible turned out to be a solved problem from approximately 2005. We have replaced the local SQLite file with a private GitHub Gist holding one JSON object per line. The user's data now exists in exactly one canonical place, accessed by N machines via the most boring, well-understood synchronization tool on Earth. We did not write the synchronization tool. We just shouted "git" at the problem and the problem mostly went away.
+
+Identity: Distributed (against my will).
+
+### 📜 The Schism (SQLite → Gist)
+
+The SQLite file did its job for many releases. It is now retired. In its place: `tasks.jsonl`, one task per line, stored in a private GitHub Gist whose URL is the entire access control surface. Each machine keeps a local git clone at `~/.local/share/lazy/repo`. Reads pull (with a thirty-second freshness window so we don't hammer GitHub for sport). Writes commit and push, automatically. The user does not run `git`. The user does not run `lazy sync`. The user types tasks and tasks appear on every machine the user owns.
+
+Onboarding a second machine is the same three commands as the first machine, with one extra word:
+
+```
+lazy init --from-gist <id>
+```
+
+The user described this as "actually feels lazy now." High praise. We have not had this much external validation since the database was accidentally erased and the user did not care.
+
+Migration from the SQLite era is a one-shot:
+
+```
+lazy migrate-from-sqlite
+```
+
+It reads `lazy.db`, writes `tasks.jsonl`, commits, pushes, and renames the source to `lazy.db.migrated` because deletions in this codebase have an unfortunate history.
+
+### 🪞 The Bjorn's Coffee Loophole (Prompt Mode)
+
+A user attempted to file a task involving an apostrophe and was rebuked by the shell. Bash will tear the line in half before lazy ever sees it; this is a kernel-level law of nature, not a bug. Our response: when `lazy a` is invoked with no description, we read directly from stdin. Apostrophes, parens, dollar signs, the entire shell-hostile bestiary — all flow through unmolested.
+
+```
+$ lazy a
+Description: buy Bjorn's coffee (work)
+Date [today]: tmw
+[27] confirmed.
+```
+
+Same trick for `lazy rn <id>` with no replacement description. The implicit one-liner (`lazy buy milk tmw`) still works for descriptions whose characters are bash-curious. The prompt is the escape hatch for descriptions whose characters bash takes personally.
+
+### 🔄 The Silent Ministry
+
+Sync is not a command. Sync is a side effect. Every read does a pull-if-stale; every write does a pull-then-write-then-push. On push reject (origin moved while you were typing), lazy rebases and retries. On network failure or any other transient sadness, lazy stays silent and tries again next time you do anything. After ten consecutive push failures we whisper a single warning to stderr and continue. After zero, we say nothing. The lazy ethos is non-observable correctness, and we are aggressively committed to it.
+
+The Distinguished Engineer originally insisted on a banner that would tell the user "N changes pending sync." The user replied that anything they had to think about constituted a total failure of the tool's premise. The Distinguished Engineer sighed in a frequency band associated with disappointment but conceded the point. The banner is gone. Auto-flush is permanent.
+
+### 🛡 The Audit (Reprise)
+
+The Distinguished Engineer returned, as he does, with a list. We addressed it.
+
+*   **Push-failure cap.** The "silent forever" failure mode now has a ceiling. After ten consecutive push failures, exactly one stderr line. The user is still not asked to do anything; merely informed.
+*   **Dirty-working-tree recovery.** If a previous invocation was killed mid-commit, the next operation auto-stashes the orphan rather than refusing to run. Tested by killing things on purpose.
+*   **Same-task-conflict test.** Two clones, both renaming task #5 to different strings. One push wins; the other rebases. Neither corrupts. We can prove it now.
+*   **`config.json` is mode `0600`.** The gist URL is your access control. We were leaving it world-readable. We are not anymore.
+*   **`lazy backend` shows the full URL.** The username segment was missing. It is not anymore.
+*   **Git version floor.** Tests assert `git >= 2.34` because pull/rebase/rev-list semantics shifted under our feet between 2.30 and 2.34. CIQ standard: same source, same toolchain, same output.
+*   **The reduction pass.** A `_writing` context manager replaces six open-coded mutators in `store.py`. The MCP server got a TOOLS table and dict-dispatch handlers. Total prod code dropped from ~1424 lines to ~1346 (-5.5% net) — though the pure cleanup was closer to 9% before the new correctness code added itself back. The Distinguished Engineer wanted 50%. He did not get 50%. He left muttering about kernel allocators.
+
+### 🩹 The Friday Fix
+
+`parse_date("next fri")` returned today + 7 instead of today + 14 when invoked on a Friday. Same bug for Saturdays. The original logic tried to be clever about edge cases and got them wrong on the days you would most want to file something for next week. The fix is one-line: `if is_next: days_ahead += 7`. The new test loops over all 49 (today, target) combinations so this regression cannot return without us noticing.
+
+### 🪦 What We Did Not Do
+
+*   **A README that requires you to read it.** The new "Getting Started" section is three commands. We refused to write a fourth.
+*   **A pluggable Backend abstraction.** A previous draft of the design proposed two storage implementations behind an interface. The Distinguished Engineer cited his "delete the abstraction, you have one caller" doctrine. We deleted it. Lazy has one user. Lazy has one storage. Lazy is one branch.
+*   **Cut a release tag.** Not yet. The user wants a soak. The user gets a soak. We will not interrupt the soak with notifications.
+
+---
+
+The user is on three machines simultaneously and yet remains, somehow, in the chaise. We have achieved distributed inaction. The Distinguished Engineer left to go correct someone in FIPS-land. The robots have been informed.
+
+`syscall(sleep, until=interrupt)`.
+
 # Lazy CLI Release Notes: v2026.05.05
 
 *The hum of a fan we forgot to clean. Three quiet beeps from a UPS in another room. Somewhere, an audit log scrolls.*

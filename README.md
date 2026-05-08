@@ -7,6 +7,24 @@ Listen, I didn't want to build this. Building things requires focus, and focus i
 
 So, I built `lazy`. It’s a zero-friction, CLI-based task manager for people who find the act of opening a mobile app to be a Type 1 hurdle. It’s for people who know that **Guilt is useless** and that a nap is always a viable strategic pivot.
 
+## 🛏 Getting Started (For New Sufferers)
+
+Three commands. I refuse to write a fourth. Your tasks live in a private gist on GitHub so they’re on every machine you own without further ceremony.
+
+```bash
+gh auth login        # one-time. you may need pants.
+lazy init            # the only effort I will require of you
+lazy buy milk tmw    # confirmed. the chaise is yours again.
+```
+
+When you crawl to a second machine — Spark in the next room, the laptop you forgot under the couch, the work computer you’re refusing to look at — bring the gist ID with you and wave it at lazy:
+
+```bash
+lazy init --from-gist <id>
+```
+
+Same gist. Same tasks. Same uncompleted obligations. Maximum laziness across maximum surface area. The gist ID is whatever `lazy init` told you on the first machine; if you forgot, `lazy backend` will remind you.
+
 ## 🤖 The Elite Interface: AI-First (MCP)
 **The "I Can't Even" Interface**
 
@@ -46,6 +64,19 @@ lazy Check if I still have a pulse 1m    # 1 month from now
 lazy cancel gym eventually               # +30 days (standard procrastination)
 ```
 *Result:* `lazy` figures out what is the task and what is the date. It’s smarter than I am, which isn't saying much today. Trailing prepositions (`on`, `at`, `in`, `for`) get quietly stripped, so `lazy fold laundry on tuesday` stores `fold laundry`, not `fold laundry on`.
+
+### 🪞 The "Bjorn's Coffee" Loophole (Prompt Mode)
+
+When your task description contains an apostrophe, parens, or whatever else bash decides to take personally, just type `lazy a` with no description and let it ask. The shell never gets to chew on the text:
+
+```
+$ lazy a
+Description: buy Bjorn's coffee (work)
+Date [today]: tmw
+[27] confirmed.
+```
+
+Same trick for renames you don't want to fight your shell about: `lazy rn 14` (no replacement text) prompts for the new description. Hit Ctrl-D on an empty prompt to bail.
 
 ### 📖 High-Status Rituals
 
@@ -101,6 +132,10 @@ I'm only writing this table once. Please don't make me do it again.
 | `lazy p` | `push` | Pushes ALL today's tasks to tomorrow. *Heaven.* |
 | `lazy 1` | `one`, `focus` | Shows exactly one task. Just one. |
 | `lazy t` | `triage` | Interactive mode. It asks questions. I hate it. |
+| `lazy a` | (prompt mode) | No description? Lazy will ask. Apostrophes welcome. |
+| `lazy init` | | One-time setup. Creates a private gist, makes it yours. |
+| `lazy init --from-gist <id>` | | Onboard a second machine onto the same gist. |
+| `lazy backend` | | Where your data is, and how recently it talked to GitHub. |
 | `lazy help` | `-h`, `--help` | Shows this again. I can't believe I'm still typing. |
 
 ---
@@ -127,10 +162,14 @@ If `parse_date` can't make sense of a string, it raises a `ValueError`. The CLI 
 
 ## ⚙️ The Boring Stuff (Systems)
 
-- **Persistence:** Uses **SQLite** (`lazy.db`, next to the script). Your tasks survive a reboot. My motivation doesn't.
-- **DB override:** Set `LAZY_DB_PATH=/some/path` to redirect the database. The test suite uses this to avoid eating your real tasks. Yes, that *was* a bug. Yes, it's fixed.
-- **Verification:** Three test files. `test_logic.py` (parser + DB unit), `test_lazy.py` (end-to-end CLI subprocess), `test_mcp.py` (JSON-RPC over stdio). `python3 -m pytest`. Run them if you're bored. They use a tempfile DB and won't touch yours.
-- **Config:** `lazy/config.json`. You can change the colors and the sarcastic messages. The schema is: `enable_colors` (bool), `completion_messages` (list[str]), `empty_state_messages` (list[str]), `add_echo_messages` (list[str], with `{description}` and `{date}` placeholders).
+- **Persistence.** Tasks live in a **private GitHub Gist** as JSONL — one task per line. Your machine keeps a local git clone at `~/.local/share/lazy/repo` and lazy pulls/pushes silently around every operation. Reads use a 30-second freshness window so a quick `lazy l` followed by `lazy d 14` doesn't hammer the API. Writes always pull-then-push. If push fails (network down, gist deleted, the universe), the commit stays local and tries again next time. After ten consecutive failures lazy whispers one warning to stderr and continues.
+- **Requirements.** `git` (>= 2.34) and `gh` (authenticated). Run `gh auth login` once per machine. The first invocation of `lazy init` creates the gist and clones it; everything else is automatic.
+- **Privacy.** A "secret" gist is URL-private — anyone with the URL can read it. Your URL lives in `~/.config/lazy/config.json` (mode `0600`). Treat the URL like a password. Don't paste it in screenshots, don't post it in Slack, don't read it aloud at conferences.
+- **Manual editing.** You can edit the gist directly in GitHub's web UI if the mood strikes — the only rule is that each non-blank line must be valid JSON with an `id` field. Lines without `id` are silently ignored. Lazy's next pull will pick up your edits.
+- **Overrides for the curious.** `LAZY_HOME=/path/to/clone` redirects the local clone (used by tests). `LAZY_NO_REMOTE=1` skips push/pull entirely (used by tests, occasionally for plane mode).
+- **Verification.** Four test files. `test_logic.py` (parser + Store unit), `test_lazy.py` (CLI subprocess), `test_mcp.py` (JSON-RPC over stdio), `test_sync.py` (integration tests against a real bare git remote — exercises auto-push, dirty-tree recovery, push-failure cap, and same-task conflicts). `python3 -m pytest`. They use temp directories and won't touch your real gist.
+- **Config.** `lazy/config.json` ships with the snarky message catalog (`completion_messages`, `empty_state_messages`, `add_echo_messages`, `enable_colors`). User overrides live in `~/.config/lazy/config.json` (`gist_id`, `gist_url`, `repo_path`, `pull_freshness_seconds`, `auto_push`).
+- **Rolling back.** If everything goes sideways: `git checkout v2026.05.05` returns you to the SQLite era; `lazy.db.migrated` next to the script is the snapshot from migration day. For corruption-of-just-the-data scenarios, the local clone's `git log` and `git reset --hard <good-sha> && git push --force-with-lease` is the precision tool.
 
 ---
 
