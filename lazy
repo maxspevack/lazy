@@ -67,11 +67,39 @@ def _split_description_and_date(words):
     return " ".join(words).strip(), date.today()
 
 
+def _prompt(label, default=None):
+    """Read one line from stdin without involving the shell.
+
+    Lets the user type apostrophes, parens, dollar signs, etc. without
+    quoting. Returns None if the user hits EOF or interrupts.
+    """
+    try:
+        suffix = f" [{default}]" if default else ""
+        return input(f"{label}{suffix}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+
 def cmd_add(args, store):
-    if not args.task_input:
-        print("Error: Description required.")
-        sys.exit(1)
-    description, due = _split_description_and_date(args.task_input)
+    if args.task_input:
+        description, due = _split_description_and_date(args.task_input)
+    else:
+        # Prompt mode: the shell doesn't get to chew on the description,
+        # so apostrophes and parens flow through fine.
+        description = _prompt("Description")
+        if description is None or not description:
+            print("Aborted.")
+            return
+        date_str = _prompt("Date", default="today")
+        if date_str is None:
+            print("Aborted.")
+            return
+        try:
+            due = parse_date(date_str) if date_str else date.today()
+        except ValueError as e:
+            print(f"Error: {e}")
+            return
     new_id = store.add_task(description, due)
     print(f"[{new_id}] {get_vibe_echo(description, due)}")
 
@@ -134,10 +162,13 @@ def cmd_rename(args, store):
     if not task:
         print(f"Task [{args.id}] not found.")
         return
-    new_desc = " ".join(args.description).strip()
+    new_desc = " ".join(args.description).strip() if args.description else ""
     if not new_desc:
-        print("Error: New description required.")
-        return
+        # Prompt mode for descriptions that need apostrophes / parens / etc.
+        new_desc = _prompt(f"Rename [{args.id}] (was: {task['description']})")
+        if new_desc is None or not new_desc:
+            print("Aborted.")
+            return
     store.rename_task(args.id, new_desc)
     print(f"Renamed [{args.id}] to \"{new_desc}\".")
 

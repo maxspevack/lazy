@@ -32,10 +32,10 @@ class TestLazyCLI(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.repo_path, ignore_errors=True)
 
-    def run_lazy(self, *args):
+    def run_lazy(self, *args, stdin_text=None):
         return subprocess.run(
             [self.lazy_bin] + list(args),
-            capture_output=True, text=True, env=self.env
+            capture_output=True, text=True, env=self.env, input=stdin_text
         )
 
     def read_tasks(self):
@@ -126,6 +126,43 @@ class TestLazyCLI(unittest.TestCase):
         task = next(t for t in self.read_tasks() if t['id'] == 1)
         tomorrow = (date.today() + timedelta(days=1)).isoformat()
         self.assertEqual(task['due_date'], tomorrow)
+
+    def test_add_prompt_mode_handles_apostrophes(self):
+        """`lazy a` with no args should prompt for description, accepting
+        characters bash would otherwise eat (apostrophes, parens, etc.)."""
+        result = self.run_lazy("a", stdin_text="buy Bjorn's coffee\ntmw\n")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        descs = [t['description'] for t in self.read_tasks()]
+        self.assertIn("buy Bjorn's coffee", descs)
+
+    def test_add_prompt_mode_handles_parens(self):
+        result = self.run_lazy("a", stdin_text="call Joe (work)\ntoday\n")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        descs = [t['description'] for t in self.read_tasks()]
+        self.assertIn("call Joe (work)", descs)
+
+    def test_add_prompt_mode_default_date_is_today(self):
+        """Empty date input should default to today."""
+        result = self.run_lazy("a", stdin_text="something\n\n")
+        self.assertEqual(result.returncode, 0)
+        tasks = self.read_tasks()
+        self.assertEqual(tasks[-1]['description'], "something")
+        self.assertEqual(tasks[-1]['due_date'], date.today().isoformat())
+
+    def test_add_prompt_mode_aborts_on_eof(self):
+        """Hitting Ctrl-D at the description prompt should abort cleanly."""
+        result = self.run_lazy("a", stdin_text="")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Aborted", result.stdout)
+        self.assertEqual(self.read_tasks(), [])
+
+    def test_rename_prompt_mode_handles_apostrophes(self):
+        self.run_lazy("a", "Original", "today")
+        tid = self.latest_id("Original")
+        result = self.run_lazy("rn", str(tid), stdin_text="Bjorn's update\n")
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        descs = [t['description'] for t in self.read_tasks()]
+        self.assertIn("Bjorn's update", descs)
 
     def test_help_alias(self):
         out = self.run_lazy("help").stdout
