@@ -18,6 +18,17 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+_GIT_FLOOR = (2, 34)  # Behavior guarantees from 2.34+: pull.rebase warning,
+                       # init.defaultBranch=main, deterministic rev-list output.
+
+
+def _git_version():
+    out = subprocess.run(['git', '--version'], capture_output=True,
+                         text=True, check=True).stdout
+    parts = out.split()[2].split('.')
+    return tuple(int(p) for p in parts[:2])
+
+
 def _git(args, cwd, check=True):
     return subprocess.run(['git'] + args, cwd=cwd, capture_output=True,
                           text=True, check=check)
@@ -26,6 +37,16 @@ def _git(args, cwd, check=True):
 def _set_identity(path):
     _git(['config', 'user.email', 'test@example.com'], cwd=path)
     _git(['config', 'user.name', 'Test'], cwd=path)
+
+
+def setUpModule():
+    """CIQ standard: same-source-same-toolchain-same-output. Tests assume
+    git >= 2.34 for pull.rebase, default-branch, and rev-list semantics."""
+    version = _git_version()
+    if version < _GIT_FLOOR:
+        raise unittest.SkipTest(
+            f"git {version[0]}.{version[1]} below floor {_GIT_FLOOR[0]}.{_GIT_FLOOR[1]}"
+        )
 
 
 class StoreWithRemote(unittest.TestCase):
@@ -181,6 +202,138 @@ class TestPushRejectIsHandled(StoreWithRemote):
             self.assertIn("B-task", descs)
         finally:
             shutil.rmtree(other_path, ignore_errors=True)
+
+
+class TestDirtyWorkingTreeRecovery(StoreWithRemote):
+    """If a previous invocation was killed mid-commit, the next operation
+    must self-clean rather than refuse or corrupt."""
+
+    def test_orphaned_staged_change_is_stashed_before_next_op(self):
+        from store import Store
+        # Simulate kill between `git add` and `git commit`: write to the
+        # working tree and stage it, but don't commit.
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        with open(path, 'w') as f:
+            f.write('{"id":99,"description":"orphan","due_date":"2026-01-01",'
+                    '"status":"pending","created_at":"2026-01-01T00:00:00Z"}\n')
+        _git(['add', 'tasks.jsonl'], cwd=self.repo_path)
+
+        # Next operation should not crash and should leave a clean tree.
+        store = Store(self.repo_path, auto_push=True, pull_freshness=0)
+        store.add_task("post-orphan", date.today())
+
+        result = _git(['status', '--porcelain'], cwd=self.repo_path)
+        self.assertEqual(result.stdout.strip(), '',
+                         "working tree must be clean after self-recovery")
+        self.assertIn("post-orphan",
+                      [t['description'] for t in self.remote_tasks()])
+
+    def test_unstaged_dirty_file_does_not_block_operation(self):
+        from store import Store
+        # Simulate manual edit of tasks.jsonl that wasn't committed.
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        with open(path, 'w') as f:
+            f.write('{"id":50,"description":"manual","due_date":"2026-01-01",'
+                    '"status":"pending","created_at":"2026-01-01T00:00:00Z"}\n')
+
+        store = Store(self.repo_path, auto_push=True, pull_freshness=0)
+        store.add_task("after-manual", date.today())
+
+        result = _git(['status', '--porcelain'], cwd=self.repo_path)
+        self.assertEqual(result.stdout.strip(), '')
+
+
+class TestSameTaskConflict(StoreWithRemote):
+    """Two clones rename the same task to different strings. One push wins;
+    the other rebases or surfaces, never silently discards."""
+
+    def test_concurrent_renames_one_wins_neither_corrupts(self):
+        from store import Store
+        # Seed a shared task on origin
+        store_a = Store(self.repo_path, auto_push=True, pull_freshness=0)
+        tid = store_a.add_task("shared", date.today())
+
+        # Set up second clone, which must have the seed commit
+        other_path = tempfile.mkdtemp(prefix='lazy-other-')
+        _git(['init', '-q', '-b', 'main'], cwd=other_path)
+        _set_identity(other_path)
+        _git(['remote', 'add', 'origin', self.remote_path], cwd=other_path)
+        _git(['fetch', '-q', 'origin'], cwd=other_path)
+        _git(['checkout', '-q', '-b', 'main', 'origin/main'], cwd=other_path,
+             check=False)
+        _git(['branch', '--set-upstream-to=origin/main', 'main'], cwd=other_path)
+        try:
+            store_b = Store(other_path, auto_push=True, pull_freshness=0)
+
+            # Both rename to different strings; A pushes first.
+            store_a.rename_task(tid, "A-rename")
+            store_b.rename_task(tid, "B-rename")
+
+            # Origin must have exactly one of the two renames; whichever B's
+            # rebase landed on should be the surviving description.
+            tasks = self.remote_tasks()
+            shared = [t for t in tasks if t['id'] == tid]
+            self.assertEqual(len(shared), 1, "task must not be duplicated")
+            self.assertIn(shared[0]['description'], ("A-rename", "B-rename"))
+        finally:
+            shutil.rmtree(other_path, ignore_errors=True)
+
+
+class TestPushFailureCap(unittest.TestCase):
+    """After N consecutive push failures, surface exactly one stderr warning."""
+
+    def setUp(self):
+        # Working clone pointing at a remote that doesn't exist
+        self.repo_path = tempfile.mkdtemp(prefix='lazy-failtest-')
+        _git(['init', '-q', '-b', 'main'], cwd=self.repo_path)
+        _set_identity(self.repo_path)
+        _git(['remote', 'add', 'origin', '/nonexistent/dead-remote.git'],
+             cwd=self.repo_path)
+        with open(os.path.join(self.repo_path, 'tasks.jsonl'), 'w') as f:
+            f.write('{"_init": true}\n')
+        _git(['add', 'tasks.jsonl'], cwd=self.repo_path)
+        _git(['commit', '-q', '-m', 'init'], cwd=self.repo_path)
+        os.environ['LAZY_HOME'] = self.repo_path
+        os.environ.pop('LAZY_NO_REMOTE', None)
+
+    def tearDown(self):
+        os.environ.pop('LAZY_HOME', None)
+        shutil.rmtree(self.repo_path, ignore_errors=True)
+
+    def test_warning_fires_exactly_at_threshold(self):
+        from store import Store, _PUSH_FAILURE_THRESHOLD
+        from io import StringIO
+        import contextlib
+
+        store = Store(self.repo_path, auto_push=True, pull_freshness=0)
+        # Drive _attempt_push directly so we don't depend on which other
+        # methods happen to push.
+        for i in range(_PUSH_FAILURE_THRESHOLD - 1):
+            buf = StringIO()
+            with contextlib.redirect_stderr(buf):
+                store._attempt_push()
+            self.assertEqual(
+                buf.getvalue(), '',
+                f"warning fired prematurely at attempt {i+1}",
+            )
+
+        # The Nth failure should produce exactly one warning line
+        buf = StringIO()
+        with contextlib.redirect_stderr(buf):
+            store._attempt_push()
+        self.assertIn("push has failed", buf.getvalue())
+        self.assertIn(f"{_PUSH_FAILURE_THRESHOLD} consecutive", buf.getvalue())
+
+    def test_counter_resets_on_success(self):
+        from store import Store
+        store = Store(self.repo_path, auto_push=True, pull_freshness=0)
+        # Drive a few failures
+        for _ in range(3):
+            store._attempt_push()
+        # Manually record success and verify the counter is back to zero
+        store._record_push(ok=True)
+        with open(store._push_failures_path()) as f:
+            self.assertEqual(f.read().strip(), '0')
 
 
 class TestNoRemoteIsSilent(unittest.TestCase):

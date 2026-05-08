@@ -288,8 +288,10 @@ def cmd_backend(args):
     if not git_ops.is_repo(repo):
         print("status:      not initialized (run `lazy init`)")
         return
-    if cfg.get('gist_id'):
-        print(f"gist:        {cfg['gist_id']} (https://gist.github.com/{cfg['gist_id']})")
+    if cfg.get('gist_url'):
+        print(f"gist:        {cfg['gist_url']}")
+    elif cfg.get('gist_id'):
+        print(f"gist:        https://gist.github.com/{cfg['gist_id']}")
     sentinel = os.path.join(os.path.dirname(repo) or '.', '.last-pull')
     try:
         age = int(time.time() - os.path.getmtime(sentinel))
@@ -340,7 +342,6 @@ Commands:
   p, push                   Push all today's tasks to tomorrow
   1, focus, one             Focus on the single most urgent task
   t, triage                 Interactively process today's tasks
-  sync                      Force pull + push against the gist
   backend                   Show storage configuration
   init [--from-gist <id>]   Bootstrap a gist-backed clone
   migrate-from-sqlite       Migrate an existing lazy.db into the gist
@@ -368,8 +369,6 @@ Commands:
     sp = subs.add_parser('init')
     sp.add_argument('--from-gist', dest='from_gist', metavar='ID',
                     help='Clone an existing private gist instead of creating one')
-    sp.add_argument('--check', action='store_true',
-                    help='Validate the existing setup')
 
     sp = subs.add_parser('backend')
     sp.set_defaults(func=cmd_backend)

@@ -79,3 +79,15 @@ def unpushed_count(path):
         return int(out)
     except ValueError:
         return 0
+
+
+def is_dirty(path):
+    """True if the working tree or index has uncommitted changes."""
+    ok, out = _run(['git', 'status', '--porcelain'], cwd=path)
+    return ok and out != ''
+
+
+def stash(path):
+    """Stash any uncommitted changes (including untracked). Silent on failure."""
+    return _run(['git', 'stash', '-u', '-q', '-m', 'lazy: orphaned write'],
+                cwd=path)

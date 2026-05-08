@@ -33,9 +33,16 @@ def _read_config():
 
 def _write_config(cfg):
     os.makedirs(CONFIG_DIR, exist_ok=True)
+    # The gist URL is the entire access control surface for a secret gist.
+    # Anyone reading this file gets full read access to your tasks. Lock it
+    # to owner-only.
     with open(CONFIG_PATH, 'w') as f:
         json.dump(cfg, f, indent=2)
         f.write('\n')
+    try:
+        os.chmod(CONFIG_PATH, 0o600)
+    except OSError:
+        pass
 
 
 def _create_gist(description="lazy task list"):
@@ -65,9 +72,6 @@ def _clone(gist_id, dest):
 
 
 def cmd_init(args):
-    if args.check:
-        return _check_setup()
-
     cfg = _read_config()
     repo_path = os.path.expanduser(cfg.get('repo_path', DEFAULT_REPO))
 
@@ -81,13 +85,14 @@ def cmd_init(args):
         print("Install gh and run `gh auth login`, then retry.", file=sys.stderr)
         sys.exit(1)
 
+    gist_url = None
     if args.from_gist:
         gist_id = args.from_gist
         print(f"Cloning gist {gist_id} -> {repo_path}...")
     else:
         print("Creating new private gist...")
-        gist_id, url = _create_gist()
-        print(f"  -> {url}")
+        gist_id, gist_url = _create_gist()
+        print(f"  -> {gist_url}")
         print(f"Cloning -> {repo_path}...")
 
     ok, err = _clone(gist_id, repo_path)
@@ -97,6 +102,8 @@ def cmd_init(args):
 
     cfg['gist_id'] = gist_id
     cfg['repo_path'] = repo_path
+    if gist_url:
+        cfg['gist_url'] = gist_url
     _write_config(cfg)
 
     print(f"Lazy is ready. Config: {CONFIG_PATH}")
@@ -104,16 +111,3 @@ def cmd_init(args):
         print(f"On other machines, run: lazy init --from-gist {gist_id}")
 
 
-def _check_setup():
-    cfg = _read_config()
-    if not cfg:
-        print(f"No config at {CONFIG_PATH}. Run `lazy init`.")
-        sys.exit(1)
-    repo_path = os.path.expanduser(cfg.get('repo_path', DEFAULT_REPO))
-    if not git_ops.is_repo(repo_path):
-        print(f"Not a git repo: {repo_path}. Run `lazy init`.")
-        sys.exit(1)
-    if not _check_gh():
-        print("gh not authenticated. Run `gh auth login`.")
-        sys.exit(1)
-    print(f"OK. gist={cfg.get('gist_id')} repo={repo_path}")
