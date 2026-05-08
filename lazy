@@ -16,17 +16,9 @@ from datetime import date, timedelta
 from store import open_store, StoreNotInitialized
 from utils import get_vibe_echo, load_config, parse_date
 
-RED, GREEN, YELLOW, GRAY, BOLD, RESET = "\033[91m", "\033[92m", "\033[93m", "\033[90m", "\033[1m", "\033[0m"
+RED, GREEN, GRAY, BOLD, RESET = "\033[91m", "\033[92m", "\033[90m", "\033[1m", "\033[0m"
 SYM_OVERDUE, SYM_TODAY, SYM_FUTURE = "⚑", "●", "○"
 STRIPPABLE_PREPS = ('in', 'at', 'on', 'for')
-
-
-def _warn_unpushed(store):
-    """Surface 'N tasks pending sync' if local is ahead of origin."""
-    n = store.unpushed_count()
-    if n:
-        plural = 's' if n != 1 else ''
-        print(f"{YELLOW}⚠  {n} change{plural} pending sync. Run `lazy sync` to push.{RESET}")
 
 
 def _aura(due, today):
@@ -85,12 +77,10 @@ def cmd_add(args, store):
 
 
 def cmd_list(args, store):
-    _warn_unpushed(store)
     print_tasks(store.get_tasks('all'), show_date=True)
 
 
 def cmd_one(args, store):
-    _warn_unpushed(store)
     tasks = store.get_tasks('all')
     if not tasks:
         print_tasks(tasks)
@@ -397,7 +387,6 @@ def main():
         except StoreNotInitialized as e:
             print(e, file=sys.stderr)
             sys.exit(1)
-        _warn_unpushed(store)
         print_tasks(store.get_tasks('today'))
         return
 

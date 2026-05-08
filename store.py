@@ -49,30 +49,42 @@ class Store:
 
     # ---- sync internals ----
 
-    def _maybe_pull(self):
-        if self.no_remote or not git_ops.has_remote(self.path):
-            return
-        try:
-            if time.time() - os.path.getmtime(self._sentinel) < self.pull_freshness:
-                return
-        except FileNotFoundError:
-            pass
-        ok, err = git_ops.pull_ff(self.path)
-        if not ok:
-            _warn(f"pull failed ({err}); using local copy")
-        # Update sentinel either way; we don't want to retry-storm on outages.
+    def _touch_sentinel(self):
         try:
             open(self._sentinel, 'w').close()
         except OSError:
             pass
 
-    def _force_pull(self):
-        """Used before writes — bypass freshness window."""
+    def _ensure_synced(self, force_pull=False):
+        """Bring local and origin into agreement. Silent on failure (lazy ethos).
+
+        - If local has unpushed commits, push them (with pull-rebase retry on
+          reject). Origin is the canonical state; pending local commits are a
+          temporary anomaly we silently flush whenever we touch the network.
+        - Otherwise, pull if forced (writes always force) or if the freshness
+          window has expired.
+
+        On any network or rebase failure: stay silent, leave state as-is, try
+        again next invocation. The user is never asked to do anything.
+        """
         if self.no_remote or not git_ops.has_remote(self.path):
             return
-        ok, err = git_ops.pull_ff(self.path)
-        if not ok:
-            _warn(f"pull failed ({err}); proceeding with local state")
+        if git_ops.unpushed_count(self.path) > 0:
+            ok, _ = git_ops.push(self.path)
+            if not ok:
+                ok, _ = git_ops.pull_rebase(self.path)
+                if ok:
+                    git_ops.push(self.path)
+            self._touch_sentinel()
+            return
+        if not force_pull:
+            try:
+                if time.time() - os.path.getmtime(self._sentinel) < self.pull_freshness:
+                    return
+            except FileNotFoundError:
+                pass
+        git_ops.pull_ff(self.path)
+        self._touch_sentinel()
 
     def _commit_and_push(self, message):
         ok, err = git_ops.add_and_commit(self.path, TASKS_FILE, message)
@@ -81,18 +93,14 @@ class Store:
             return
         if not self.auto_push or not git_ops.has_remote(self.path):
             return
-        ok, err = git_ops.push(self.path)
+        ok, _ = git_ops.push(self.path)
         if ok:
             return
-        # Push rejected — remote moved while we were writing. Pull-rebase, retry.
-        ok, err = git_ops.pull_rebase(self.path)
-        if not ok:
-            _warn(f"push rejected and rebase failed ({err})")
-            _warn(f"  resolve in {self.path}/{TASKS_FILE} and run `lazy sync`")
-            return
-        ok, err = git_ops.push(self.path)
-        if not ok:
-            _warn(f"push failed after rebase ({err}); commit is local. retry with `lazy sync`")
+        # Push rejected — origin moved while we were writing. Rebase, retry.
+        ok, _ = git_ops.pull_rebase(self.path)
+        if ok:
+            git_ops.push(self.path)
+        # Stay silent on remaining failures; next op will re-attempt.
 
     # ---- file IO ----
 
@@ -129,7 +137,7 @@ class Store:
     # ---- public API (mirrors old db.py shape) ----
 
     def get_tasks(self, mode):
-        self._maybe_pull()
+        self._ensure_synced()
         tasks = [t for t in self._read() if t.get('status') == 'pending']
         if mode == 'today':
             today = date.today().isoformat()
@@ -137,14 +145,14 @@ class Store:
         return sorted(tasks, key=lambda t: (t['due_date'], t['id']))
 
     def get_task(self, task_id):
-        self._maybe_pull()
+        self._ensure_synced()
         for t in self._read():
             if t['id'] == task_id:
                 return t
         return None
 
     def add_task(self, description, due_date):
-        self._force_pull()
+        self._ensure_synced(force_pull=True)
         tasks = self._read()
         new_id = max((t['id'] for t in tasks), default=0) + 1
         tasks.append({
@@ -162,7 +170,7 @@ class Store:
         self._mutate(task_id, {'status': 'done'}, f"done: {task_id}")
 
     def delete_task(self, task_id):
-        self._force_pull()
+        self._ensure_synced(force_pull=True)
         tasks = self._read()
         before = len(tasks)
         tasks = [t for t in tasks if t['id'] != task_id]
@@ -176,7 +184,7 @@ class Store:
                      f"move: {task_id} -> {_iso(new_date)}")
 
     def rename_task(self, task_id, new_description):
-        self._force_pull()
+        self._ensure_synced(force_pull=True)
         tasks = self._read()
         for t in tasks:
             if t['id'] == task_id:
@@ -187,7 +195,7 @@ class Store:
         raise ValueError(f"Task {task_id} not found.")
 
     def push_tasks(self, from_date=None, to_date=None):
-        self._force_pull()
+        self._ensure_synced(force_pull=True)
         from_iso = _iso(from_date or date.today())
         to_iso = _iso(to_date or (date.today() + timedelta(days=1)))
         tasks = self._read()
@@ -202,7 +210,7 @@ class Store:
         return moved
 
     def _mutate(self, task_id, fields, message):
-        self._force_pull()
+        self._ensure_synced(force_pull=True)
         tasks = self._read()
         hit = False
         for t in tasks:
