@@ -5,22 +5,22 @@
 
 Listen, I didn't want to build this. Building things requires focus, and focus is just a fancy word for "unpaid labor I do for my own brain." But the friction of life—the nagging, the "to-do" lists that look like scrolls of judgment—it became more exhausting to ignore than to fix. 
 
-So, I built `lazy`. It’s a zero-friction, CLI-based task manager for people who find the act of opening a mobile app to be a Type 1 hurdle. It’s for people who know that **Guilt is useless** and that a nap is always a viable strategic pivot.
+So, I built `lazy`. It’s a zero-friction, CLI-based task manager for people who find the act of opening a mobile app to be a Type 1 hurdle. It’s for people who know that **Guilt is useless** and that a nap is always a viable strategic pivot. It's the replacement I always wanted for [LazyMeter](https://lifehacker.com/lazymeter-helps-you-focus-on-todays-tasks-tracks-your-5827907) that I was too lazy to build until AI could do it for me.
 
 ## 🛏 Getting Started (For New Sufferers)
 
-Three commands. I refuse to write a fourth. Your tasks live in a private gist on GitHub so they’re on every machine you own without further ceremony.
+Three commands. Your tasks live in a private gist on GitHub so they’re on every machine you own without further ceremony. You will not type `git clone`. You will not type `git push`. Lazy does the boring stuff so you don't have to.
 
 ```bash
 gh auth login        # one-time. you may need pants.
-lazy init            # the only effort I will require of you
+lazy init            # creates the gist, clones it, wires up the config — done
 lazy buy milk tmw    # confirmed. the chaise is yours again.
 ```
 
-When you crawl to a second machine — Spark in the next room, the laptop you forgot under the couch, the work computer you’re refusing to look at — bring the gist ID with you and wave it at lazy:
+When you crawl to a second machine — desktop in the next room, the laptop you forgot under the couch, the work computer you’re refusing to look at — bring the gist ID with you and wave it at lazy:
 
 ```bash
-lazy init --from-gist <id>
+lazy init --from-gist <id>     # clones the existing gist; same setup, no git involvement
 ```
 
 Same gist. Same tasks. Same uncompleted obligations. Maximum laziness across maximum surface area. The gist ID is whatever `lazy init` told you on the first machine; if you forgot, `lazy backend` will remind you.
@@ -169,7 +169,9 @@ If `parse_date` can't make sense of a string, it raises a `ValueError`. The CLI 
 - **Overrides for the curious.** `LAZY_HOME=/path/to/clone` redirects the local clone (used by tests). `LAZY_NO_REMOTE=1` skips push/pull entirely (used by tests, occasionally for plane mode).
 - **Verification.** Four test files. `test_logic.py` (parser + Store unit), `test_lazy.py` (CLI subprocess), `test_mcp.py` (JSON-RPC over stdio), `test_sync.py` (integration tests against a real bare git remote — exercises auto-push, dirty-tree recovery, push-failure cap, and same-task conflicts). `python3 -m pytest`. They use temp directories and won't touch your real gist.
 - **Config.** `lazy/config.json` ships with the snarky message catalog (`completion_messages`, `empty_state_messages`, `add_echo_messages`, `enable_colors`). User overrides live in `~/.config/lazy/config.json` (`gist_id`, `gist_url`, `repo_path`, `pull_freshness_seconds`, `auto_push`).
-- **Rolling back.** If everything goes sideways: `git checkout v2026.05.05` returns you to the SQLite era; `lazy.db.migrated` next to the script is the snapshot from migration day. For corruption-of-just-the-data scenarios, the local clone's `git log` and `git reset --hard <good-sha> && git push --force-with-lease` is the precision tool.
+- **Rolling back.** Two tiers, both unhurried.
+  - **Precision tool: undo a bad commit.** Lazy's gist clone is a real git repo. `git -C ~/.local/share/lazy/repo log --oneline` shows your task history; `git -C ~/.local/share/lazy/repo reset --hard <good-sha> && git -C ~/.local/share/lazy/repo push --force-with-lease` returns the gist to a known-good state. You lose only what happened between the bad commit and now.
+  - **Floor: nuke and pave.** `git checkout v2026.05.05` puts the lazy code back in the SQLite era; `mv ~/gemini/lazy/lazy.db.migrated ~/gemini/lazy/lazy.db` restores the data file that was preserved on migration day (2026-05-08). You lose everything added since 2026-05-08, but you also lose any new bug that came with the gist storage.
 
 ---
 

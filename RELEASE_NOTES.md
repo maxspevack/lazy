@@ -65,7 +65,6 @@ The Distinguished Engineer returned, as he does, with a list. We addressed it.
 
 *   **A README that requires you to read it.** The new "Getting Started" section is three commands. We refused to write a fourth.
 *   **A pluggable Backend abstraction.** A previous draft of the design proposed two storage implementations behind an interface. The Distinguished Engineer cited his "delete the abstraction, you have one caller" doctrine. We deleted it. Lazy has one user. Lazy has one storage. Lazy is one branch.
-*   **Cut a release tag.** Not yet. The user wants a soak. The user gets a soak. We will not interrupt the soak with notifications.
 
 ---
 
