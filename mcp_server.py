@@ -113,7 +113,14 @@ def _handle_call(params):
             store = open_store()
         except StoreNotInitialized as e:
             return {"isError": True, "content": [{"type": "text", "text": str(e)}]}
-    text = handler(store, args, cfg)
+    try:
+        text = handler(store, args, cfg)
+    except Exception as e:
+        # Tool-level error, not a protocol error: the request stays answerable,
+        # so the client never waits on a response that will not come.
+        return {"isError": True,
+                "content": [{"type": "text",
+                             "text": f"{name} failed: {type(e).__name__}: {e}"}]}
     return {"content": [{"type": "text", "text": text}]}
 
 
@@ -131,6 +138,7 @@ def _handle(method, params):
 
 def main():
     while True:
+        req_id = None
         try:
             line = sys.stdin.readline()
             if not line:
@@ -148,8 +156,11 @@ def main():
             sys.stdout.write(json.dumps(resp) + "\n")
             sys.stdout.flush()
         except Exception as e:
+            # id is null only when it could not be read (parse error); an
+            # id-less error frame is unmatchable, and strict clients drop it
+            # and wait forever on the original request.
             sys.stdout.write(json.dumps(
-                {"jsonrpc": "2.0", "id": None,
+                {"jsonrpc": "2.0", "id": req_id,
                  "error": {"code": -32603, "message": str(e)}}
             ) + "\n")
             sys.stdout.flush()

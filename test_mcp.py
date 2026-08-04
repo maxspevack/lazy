@@ -116,6 +116,17 @@ class TestMCP(unittest.TestCase):
         r = self._call_tool('lazy_nonsense')
         self.assertTrue(r['result'].get('isError'))
 
+    def test_bad_arguments_yield_tool_error_not_hang(self):
+        """2026-08-04 regression: lazy_add called with wrong argument names
+        raised KeyError, which escaped to the outer loop and produced an
+        id:null error frame. Strict MCP clients (Claude Code) drop id:null
+        frames and wait forever on the original request id. The response
+        must be a tool-level isError result carrying the request id."""
+        r = self._call_tool('lazy_add', {'title': 'wrong', 'details': 'params'})
+        self.assertEqual(r['id'], 1)
+        self.assertTrue(r['result'].get('isError'))
+        self.assertIn('description', r['result']['content'][0]['text'])
+
 
 if __name__ == "__main__":
     unittest.main()
