@@ -1,3 +1,32 @@
+# Lazy CLI Release Notes: v2026.08.05
+
+*Eighty-nine days of silence. The chaise has developed a permanent depression in the shape of a person. This is what winning looks like.*
+
+Nothing happened between May and August, and we want to be very clear that this was on purpose. The gist synced. The tasks appeared on every machine. The robots nagged autonomously, as designed. The system reached the state every previous release was quietly promising: no releases required. Then a robot asked us a question wrong, and instead of saying "no," we said nothing for 135 seconds, and apparently *that* was the problem.
+
+Identity: Unbothered (previously: unreachable).
+
+### 📞 The Robot We Left On Read
+
+A robot called `lazy_add` with the wrong argument names — `title` and `details`, which is flattering, but the parameter has always been `description`. The handler raised a `KeyError`. The `KeyError` escaped to the outer loop. The outer loop emitted a JSON-RPC error frame addressed to `id: null` — an error addressed to no one, delivered to everyone. Strict clients (Claude Code, notably) validate their mail, drop the unaddressed frame at the door, and keep waiting — politely, silently, forever — on the request id they actually sent. A malformed call became a 135-second hang. The robot experienced what our user experiences daily: total non-response. Unlike our user, the robot did not find this restful.
+
+The fix has two parts, because the bug did:
+
+*   **Handler exceptions are now tool-level errors.** A failing tool call returns an `isError` result carrying the original request id, the tool's name, and the exception. The client is told "no" the instant "no" becomes true, instead of being left to infer it from the heat death of its timeout.
+*   **The outer fallback echoes the request id when it managed to read one.** `id: null` is now reserved for genuine parse errors — lines so damaged no id could be extracted — which is what JSON-RPC 2.0 meant all along. We have stopped using it as a shrug.
+
+The regression test speaks bad arguments at a live server and asserts the reply arrives instantly, carries the right id, and names the parameter the robot should have used. It was verified to fail against the unfixed server, because a test that cannot fail is a decoration.
+
+### 🪦 What We Did Not Do
+
+Everything else. The suite is one test bigger (58, all passing), the server is thirteen lines heavier, and no user-facing behavior changed unless you are a robot who gets your arguments wrong — in which case you are now rejected in milliseconds instead of ghosted. We consider this release a rounding error and we are proud of it.
+
+---
+
+One bug, one fix, one test. At this pace, the next release will consist of nothing at all, and it will be our finest work.
+
+`syscall(sleep, until=interrupt)`.
+
 # Lazy CLI Release Notes: v2026.05.08
 
 *A second laptop, opened in another room, and the same task list was already there. Nobody touched anything. We are not entirely sure how this is supposed to feel.*
