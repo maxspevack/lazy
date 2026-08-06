@@ -66,7 +66,18 @@ _MONTHS = {
     'dec': 12, 'december': 12,
 }
 
-_WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+# Matched exactly, never by prefix: a prefix match turned ordinary words into
+# dates ('wedding' -> Wednesday, 'monica' -> Monday), and the CLI's implicit-add
+# then ate the word as the due date and truncated the description.
+_WEEKDAYS = [
+    {'mon', 'monday'},
+    {'tue', 'tues', 'tuesday'},
+    {'wed', 'weds', 'wednesday'},
+    {'thu', 'thur', 'thurs', 'thursday'},
+    {'fri', 'friday'},
+    {'sat', 'saturday'},
+    {'sun', 'sunday'},
+]
 
 _OFFSET_RE = re.compile(r'^\+?(\d+)([dwmy]?)$')
 _FUZZY_RE = re.compile(r'^(?:in\s+)?(\d+)\s+(day|week|month|year)s?$')
@@ -137,8 +148,8 @@ def parse_date(date_str, today=None):
 
     is_next = s.startswith('next ')
     bare = s[5:] if is_next else s
-    for idx, day in enumerate(_WEEKDAYS):
-        if bare.startswith(day):
+    for idx, names in enumerate(_WEEKDAYS):
+        if bare in names:
             # Plain '<day>' = next occurrence (1-7 days ahead).
             # 'next <day>' = skip the upcoming one, get the week after.
             days_ahead = (idx - today.weekday()) % 7 or 7
@@ -150,6 +161,11 @@ def parse_date(date_str, today=None):
         try:
             if '%Y' not in fmt:
                 dt = datetime.strptime(f"{today.year}-{date_str}", f"%Y-{fmt}")
+                # No year given: mean the next occurrence, the same rule the
+                # month-name branch uses. Otherwise `01-02` in August is a task
+                # that is instantly and permanently overdue.
+                if dt.date() < today:
+                    dt = dt.replace(year=today.year + 1)
             else:
                 dt = datetime.strptime(date_str, fmt)
             return dt.date()

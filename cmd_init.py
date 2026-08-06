@@ -61,7 +61,12 @@ def _create_gist(description="lazy task list"):
     if result.returncode != 0:
         print(f"gh gist create failed: {result.stderr}", file=sys.stderr)
         sys.exit(1)
-    url = result.stdout.strip().splitlines()[-1]
+    lines = result.stdout.strip().splitlines()
+    if not lines:
+        print("gh gist create returned no URL. Output was:", file=sys.stderr)
+        print(result.stderr or "(empty)", file=sys.stderr)
+        sys.exit(1)
+    url = lines[-1]
     gist_id = url.rstrip('/').split('/')[-1]
     return gist_id, url
 
@@ -75,7 +80,7 @@ def cmd_init(args):
     cfg = _read_config()
     repo_path = os.path.expanduser(cfg.get('repo_path', DEFAULT_REPO))
 
-    if os.path.exists(repo_path):
+    if git_ops.is_repo(repo_path):
         print(f"Lazy is already initialized at {repo_path}.")
         print("  (Run `lazy backend` to inspect.)")
         return

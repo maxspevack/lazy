@@ -4,6 +4,7 @@
 import json
 import os
 import random
+import re
 import sys
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -52,11 +53,31 @@ def _h_list(store, a, cfg):
     tasks = store.get_tasks(a.get("mode", "today"))
     if not tasks:
         return f"✨ {random.choice(cfg.get('empty_state_messages', ['Nothing to do!']))}"
-    rows = [f"{t['id']:<3} | {t['due_date']} | {t['description']}" for t in tasks]
+    rows = [f"{t['id']:<3} | {t.get('due_date', '?')} | {_clean(t['description'])}"
+            for t in tasks]
     return "ID | Due Date | Description\n" + "-" * 30 + "\n" + "\n".join(rows) + "\n"
 
 
+_CTRL_RE = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
+
+
+def _clean(text):
+    """Strip C0/C1 control characters. Descriptions round-trip through a
+    network-synced gist into both a terminal and the model's context; escape
+    sequences have no business in either."""
+    return _CTRL_RE.sub('', str(text))
+
+
+def _coerce_id(a):
+    """Accept an id the client stringified. Without this, {"id": "1"} produced
+    a confident 'not found' for a task that exists."""
+    if "id" in a:
+        a = dict(a, id=int(a["id"]))
+    return a
+
+
 def _h_done(store, a, cfg):
+    a = _coerce_id(a)
     t = store.get_task(a["id"])
     if not t:
         return f"Task [{a['id']}] not found."
@@ -66,6 +87,7 @@ def _h_done(store, a, cfg):
 
 
 def _h_rename(store, a, cfg):
+    a = _coerce_id(a)
     t = store.get_task(a["id"])
     if not t:
         return f"Task [{a['id']}] not found."
@@ -74,6 +96,7 @@ def _h_rename(store, a, cfg):
 
 
 def _h_move(store, a, cfg):
+    a = _coerce_id(a)
     t = store.get_task(a["id"])
     if not t:
         return f"Task [{a['id']}] not found."

@@ -4,7 +4,7 @@
 Philosophy: "Why do today what you can push to tomorrow?"
 """
 
-__version__ = "v2026.05.08"
+__version__ = "v2026.08.05"
 
 import argparse
 import json
@@ -56,11 +56,10 @@ def _split_description_and_date(words):
             try:
                 d = parse_date(" ".join(words[-take:]))
                 desc = " ".join(words[:-take]).strip()
-                if take == 1:
-                    for prep in STRIPPABLE_PREPS:
-                        if desc.lower().endswith(f" {prep}"):
-                            desc = desc[:-(len(prep) + 1)].rstrip()
-                            break
+                for prep in STRIPPABLE_PREPS:
+                    if desc.lower().endswith(f" {prep}"):
+                        desc = desc[:-(len(prep) + 1)].rstrip()
+                        break
                 return desc, d
             except ValueError:
                 continue
@@ -275,7 +274,7 @@ def cmd_backend(args):
         try:
             with open(cfg_path) as f:
                 cfg = json.load(f)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, OSError):
             pass
     home = os.environ.get('LAZY_HOME')
     if home:
@@ -351,6 +350,7 @@ Commands:
         usage=usage, formatter_class=argparse.RawTextHelpFormatter, add_help=False
     )
     parser.add_argument('-h', '--help', action='help', help='Show this help message and exit')
+    parser.add_argument('--version', action='version', version=f"lazy {__version__}")
     subs = parser.add_subparsers(dest='command')
     for name, aliases, takes_id, accepts_extra, func in COMMANDS:
         sp = subs.add_parser(name, aliases=aliases)
@@ -385,8 +385,11 @@ def _maybe_inject_add(parser):
     """Heuristic: if argv looks like 'lazy <not-a-command> ...', insert 'a' as the verb."""
     if len(sys.argv) <= 1:
         return
-    known = set(parser._subparsers._group_actions[0].choices)
-    known.update({'-h', '--help'})
+    known = set()
+    for entry in COMMANDS:
+        known.add(entry[0])
+        known.update(entry[1])
+    known.update({'init', 'migrate', 'backend', '-h', '--help', '--version'})
 
     first = sys.argv[1]
     inject = False

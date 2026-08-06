@@ -57,6 +57,23 @@ class TestParseDate(unittest.TestCase):
         self.assertEqual(parse_date("tomorrow"), today + timedelta(days=1))
         self.assertEqual(parse_date("yesterday"), today - timedelta(days=1))
 
+    def test_words_beginning_with_a_weekday_are_not_dates(self):
+        """Prefix matching turned ordinary words into dates: `lazy plan wedding`
+        stored the description "plan" due Wednesday."""
+        from utils import parse_date
+        for word in ("wedding", "monica", "monster", "sunny", "fridge",
+                     "saturated", "satisfy", "thursty"):
+            with self.assertRaises(ValueError, msg=f"{word!r} parsed as a date"):
+                parse_date(word)
+
+    def test_every_weekday_spelling_still_parses(self):
+        from utils import parse_date
+        for name in ("mon", "monday", "tue", "tues", "tuesday", "wed",
+                     "wednesday", "thu", "thurs", "thursday", "fri", "friday",
+                     "sat", "saturday", "sun", "sunday"):
+            self.assertIsInstance(parse_date(name), date, f"{name!r} stopped parsing")
+            self.assertIsInstance(parse_date(f"next {name}"), date)
+
     def test_offsets(self):
         from utils import parse_date
         today = date.today()
@@ -198,6 +215,22 @@ class TestStore(IsolatedStore):
         tid = store.add_task("trash", date.today())
         store.delete_task(tid)
         self.assertIsNone(store.get_task(tid))
+
+    def test_unparseable_lines_survive_a_write(self):
+        """A line we cannot parse must be carried through, not deleted. It used
+        to be dropped on read and erased by the very next write -- so a
+        truncated line (power loss) or a hand-edited gist line vanished."""
+        from store import open_store
+        path = os.path.join(self.repo_path, 'tasks.jsonl')
+        with open(path, 'w') as f:
+            f.write('{"id":1,"description":"real","due_date":"2030-01-01","status":"pending"}\n')
+            f.write('{"id":2,"description":"truncated"\n')   # no closing brace
+            f.write('{"_init": true}\n')
+        store = open_store()
+        store.add_task("new one", date.today())
+        raw = open(path).read()
+        self.assertIn('"truncated"', raw, "unparseable line was destroyed")
+        self.assertIn('"_init"', raw, "metadata line was destroyed")
 
     def test_metadata_lines_are_skipped(self):
         """A line without an 'id' field should be silently ignored on read."""

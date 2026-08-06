@@ -208,7 +208,7 @@ class TestDirtyWorkingTreeRecovery(StoreWithRemote):
     """If a previous invocation was killed mid-commit, the next operation
     must self-clean rather than refuse or corrupt."""
 
-    def test_orphaned_staged_change_is_stashed_before_next_op(self):
+    def test_orphaned_staged_change_is_preserved_not_discarded(self):
         from store import Store
         # Simulate kill between `git add` and `git commit`: write to the
         # working tree and stage it, but don't commit.
@@ -225,8 +225,12 @@ class TestDirtyWorkingTreeRecovery(StoreWithRemote):
         result = _git(['status', '--porcelain'], cwd=self.repo_path)
         self.assertEqual(result.stdout.strip(), '',
                          "working tree must be clean after self-recovery")
-        self.assertIn("post-orphan",
-                      [t['description'] for t in self.remote_tasks()])
+        descs = [t['description'] for t in self.remote_tasks()]
+        self.assertIn("post-orphan", descs)
+        # The orphan was a real task the user was told had been added. It must
+        # survive recovery -- stashing it made it invisible to every command.
+        self.assertIn("orphan", descs,
+                      "orphaned write must be recovered, not discarded")
 
     def test_unstaged_dirty_file_does_not_block_operation(self):
         from store import Store
@@ -364,6 +368,50 @@ class TestNoRemoteIsSilent(unittest.TestCase):
         store.add_task("b", date.today())
         descs = {t['description'] for t in store.get_tasks('all')}
         self.assertEqual(descs, {"a", "b"})
+
+
+
+
+class TestRebaseConflictRecovery(StoreWithRemote):
+    """The branch that had zero coverage: a genuinely divergent push that gets
+    rejected, rebases, and CONFLICTS. The existing conflict tests cannot reach
+    it -- _writing force-pulls before every mutation, so the second writer is
+    always current and its push is never rejected."""
+
+    def _second_clone(self):
+        path = tempfile.mkdtemp(prefix='lazy-cloneb-')
+        _git(['clone', '-q', self.remote_path, path], cwd=os.path.dirname(path))
+        _set_identity(path)
+        self.addCleanup(shutil.rmtree, path, ignore_errors=True)
+        return path
+
+    def test_conflicting_divergence_leaves_a_usable_repo(self):
+        from store import Store
+        a = Store(self.repo_path, auto_push=True, pull_freshness=0)
+        tid = a.add_task("original", date.today())
+
+        b_path = self._second_clone()
+        # B goes offline and edits the same task A is about to edit.
+        offline_b = Store(b_path, auto_push=False, pull_freshness=0, no_remote=True)
+        offline_b.rename_task(tid, "B version")
+
+        a.rename_task(tid, "A version")   # A wins the race to origin
+
+        # B comes back online with an unpushed commit against an advanced origin:
+        # push rejected -> pull --rebase -> conflict on the same line.
+        b = Store(b_path, auto_push=True, pull_freshness=0)
+        b.get_tasks('all')
+
+        head = _git(['symbolic-ref', '-q', 'HEAD'], cwd=b_path, check=False)
+        self.assertEqual(head.returncode, 0,
+                         "HEAD must stay on a branch; a detached HEAD sends every "
+                         "later write to a commit no push will ever deliver")
+        status = _git(['status', '--porcelain'], cwd=b_path)
+        self.assertNotIn('UU', status.stdout,
+                         "no unresolved conflict may be left in the working tree")
+        # B's own work is still reachable from its branch.
+        log = _git(['log', '--oneline', '-20'], cwd=b_path).stdout
+        self.assertIn("B version", log, "B's local commit must survive recovery")
 
 
 if __name__ == "__main__":

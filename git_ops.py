@@ -7,14 +7,24 @@ decides what to do on failure (warn, retry, abort).
 import os
 import subprocess
 
-_TIMEOUT = 30
+_TIMEOUT = 30        # network operations
+_LOCAL_TIMEOUT = 5   # plumbing that never touches the remote
+
+
+_LOCAL_CMDS = {'rev-parse', 'status', 'diff', 'config', 'rev-list', 'init', 'add'}
 
 
 def _run(args, cwd):
     """Returns (ok, output). Output is stdout on success, stderr on failure."""
+    timeout = _LOCAL_TIMEOUT if len(args) > 1 and args[1] in _LOCAL_CMDS else _TIMEOUT
+    # capture_output covers stdout/stderr but NOT stdin: a git credential
+    # prompt would otherwise read from the MCP server's JSON-RPC channel,
+    # eating client requests. Fail the prompt instead of answering it.
+    env = dict(os.environ, GIT_TERMINAL_PROMPT='0', GIT_ASKPASS='', SSH_ASKPASS='')
     try:
         result = subprocess.run(
-            args, cwd=cwd, capture_output=True, text=True, timeout=_TIMEOUT
+            args, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL, env=env
         )
         ok = result.returncode == 0
         out = (result.stdout if ok else result.stderr) or ''
@@ -33,12 +43,6 @@ def is_repo(path):
 def has_remote(path):
     ok, out = _run(['git', 'config', '--get', 'remote.origin.url'], cwd=path)
     return ok and out != ''
-
-
-def init_repo(path):
-    """Initialize a fresh repo at path. Used for tests; real installs clone."""
-    os.makedirs(path, exist_ok=True)
-    return _run(['git', 'init', '-q', '-b', 'main'], cwd=path)
 
 
 def clone(url, dest):
@@ -87,7 +91,16 @@ def is_dirty(path):
     return ok and out != ''
 
 
-def stash(path):
-    """Stash any uncommitted changes (including untracked). Silent on failure."""
-    return _run(['git', 'stash', '-u', '-q', '-m', 'lazy: orphaned write'],
-                cwd=path)
+def rebase_in_progress(path):
+    """True if a rebase is stopped mid-flight. HEAD is detached in that state,
+    so any commit we make would land somewhere the branch cannot reach."""
+    ok, gitdir = _run(['git', 'rev-parse', '--absolute-git-dir'], cwd=path)
+    if not ok:
+        return False
+    return any(os.path.exists(os.path.join(gitdir, d))
+               for d in ('rebase-merge', 'rebase-apply'))
+
+
+def rebase_abort(path):
+    """Return to the pre-rebase state. Local commits are preserved."""
+    return _run(['git', 'rebase', '--abort'], cwd=path)
