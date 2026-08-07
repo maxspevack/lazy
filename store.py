@@ -371,13 +371,21 @@ class Store:
 
 # ---- factory ----
 
-def _read_user_config():
+def read_user_config():
+    """The one reader for ~/.config/lazy/config.json.
+
+    There were three, with three different error-tolerance sets: a
+    PermissionError tracebacked in the CLI copy and nowhere else.
+    """
     path = os.path.expanduser('~/.config/lazy/config.json')
     try:
         with open(path) as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
         return {}
+
+
+_read_user_config = read_user_config   # internal alias, pre-existing callers
 
 
 def open_store():

@@ -5,14 +5,14 @@ import os
 import shutil
 import subprocess
 import tempfile
+import sys
 import unittest
 from datetime import date, timedelta
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def _setup_repo(path):
-    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=path, check=True)
-    subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=path, check=True)
-    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=path, check=True)
+from tests_common import git as _git, set_identity as _set_identity, \
+    setup_repo as _setup_repo, parse_tasks
 
 
 class TestLazyCLI(unittest.TestCase):

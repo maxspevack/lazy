@@ -268,14 +268,8 @@ def cmd_backend(args):
     """Print configured backend, repo state, and last-pull info."""
     import time
     import git_ops
-    cfg_path = os.path.expanduser('~/.config/lazy/config.json')
-    cfg = {}
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path) as f:
-                cfg = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
+    from store import read_user_config
+    cfg = read_user_config()
     home = os.environ.get('LAZY_HOME')
     if home:
         repo = os.path.expanduser(home)

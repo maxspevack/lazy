@@ -17,6 +17,9 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from tests_common import git as _git, set_identity as _set_identity, \
+    setup_repo as _setup_repo, parse_tasks
+
 
 _GIT_FLOOR = (2, 34)  # Behavior guarantees from 2.34+: pull.rebase warning,
                        # init.defaultBranch=main, deterministic rev-list output.
@@ -29,14 +32,8 @@ def _git_version():
     return tuple(int(p) for p in parts[:2])
 
 
-def _git(args, cwd, check=True):
-    return subprocess.run(['git'] + args, cwd=cwd, capture_output=True,
-                          text=True, check=check)
 
 
-def _set_identity(path):
-    _git(['config', 'user.email', 'test@example.com'], cwd=path)
-    _git(['config', 'user.name', 'Test'], cwd=path)
 
 
 def setUpModule():
@@ -77,16 +74,7 @@ class StoreWithRemote(unittest.TestCase):
 
     def remote_tasks(self):
         """tasks.jsonl as it currently exists on origin."""
-        result = _git(['show', 'main:tasks.jsonl'], cwd=self.remote_path)
-        out = []
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            if 'id' in obj:
-                out.append(obj)
-        return out
+        return parse_tasks(_git(['show', 'main:tasks.jsonl'], cwd=self.remote_path).stdout)
 
     def local_unpushed(self):
         result = _git(['rev-list', '--count', '@{u}..HEAD'], cwd=self.repo_path)

@@ -9,12 +9,10 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from tests_common import git as _git, set_identity as _set_identity, \
+    setup_repo as _setup_repo, parse_tasks
 
-def _setup_repo(path):
-    """Create an empty git repo with a configured identity."""
-    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=path, check=True)
-    subprocess.run(['git', 'config', 'user.email', 'test@example.com'], cwd=path, check=True)
-    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=path, check=True)
+
 
 
 class IsolatedStore(unittest.TestCase):
@@ -35,15 +33,7 @@ class IsolatedStore(unittest.TestCase):
         path = os.path.join(self.repo_path, 'tasks.jsonl')
         if not os.path.exists(path):
             return []
-        out = []
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    obj = json.loads(line)
-                    if 'id' in obj:
-                        out.append(obj)
-        return out
+        return parse_tasks(open(path).read())
 
 
 class TestParseDate(unittest.TestCase):
