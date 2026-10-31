@@ -43,6 +43,17 @@ It’s the elite way to procrastinate. The robots do the tracking; you do the re
 
 ---
 
+## 📅 The Calendar Mirror (Optional, Like Most Things)
+
+If you want your obligations to haunt the same Google Calendar as everything else, lazy will mirror them there. One-way: lazy is the truth, the calendar is the reflection. Every pending task becomes an all-day event on its due date, on a dedicated calendar called **Lazy** (created the first time; toggle it off in Google Calendar's sidebar on days you prefer denial). Add, rename, move, bump, push, done, delete — every write re-reconciles the whole calendar against your pending list, so a sync that fails (plane, tunnel, the void) heals itself on the next write. Nothing you hand-place on any *other* calendar is ever touched; untagged events on the Lazy calendar are left alone too.
+
+```jsonc
+// ~/.config/lazy/config.json — per machine; machines without it keep working, they just don't mirror
+{ "calendar_sync": true }
+```
+
+Credentials are the three OAuth values a `google-workspace-mcp` setup already keeps in your OS keyring (`client_id`, `client_secret`, `refresh_token`, under service `google-workspace-mcp`; set `calendar_keyring_service` if yours differs). No new packages, no token files. If the keyring is empty, lazy says so in one stderr line and gets on with your task — the calendar never blocks the chaise. Dragging an event around in Google Calendar changes nothing: move the task in lazy, and the calendar follows.
+
 ## 🏛️ The CLI (For when the smelling salts kick in)
 
 If you absolutely must interact with a terminal, I've tried to make it as painless as possible. I omitted every needless keystroke because my fingers were tired.
@@ -167,8 +178,8 @@ If `parse_date` can't make sense of a string, it raises a `ValueError`. The CLI 
 - **Privacy.** A "secret" gist is URL-private — anyone with the URL can read it. Your URL lives in `~/.config/lazy/config.json` (mode `0600`). Treat the URL like a password. Don't paste it in screenshots, don't post it in Slack, don't read it aloud at conferences.
 - **Manual editing.** You can edit the gist directly in GitHub's web UI if the mood strikes — the only rule is that each non-blank line must be valid JSON with an `id` field. Lines without `id` are silently ignored. Lazy's next pull will pick up your edits.
 - **Overrides for the curious.** `LAZY_HOME=/path/to/clone` redirects the local clone (used by tests). `LAZY_NO_REMOTE=1` skips push/pull entirely (used by tests, occasionally for plane mode).
-- **Verification.** Four test files. `test_logic.py` (parser + Store unit), `test_lazy.py` (CLI subprocess), `test_mcp.py` (JSON-RPC over stdio), `test_sync.py` (integration tests against a real bare git remote — exercises auto-push, dirty-tree recovery, push-failure cap, and same-task conflicts). `python3 -m pytest`. They use temp directories and won't touch your real gist.
-- **Config.** `lazy/config.json` ships with the snarky message catalog (`completion_messages`, `empty_state_messages`, `add_echo_messages`, `enable_colors`). User overrides live in `~/.config/lazy/config.json` (`gist_id`, `gist_url`, `repo_path`, `pull_freshness_seconds`, `auto_push`).
+- **Verification.** Five test files. `test_logic.py` (parser + Store unit), `test_lazy.py` (CLI subprocess), `test_mcp.py` (JSON-RPC over stdio), `test_sync.py` (integration tests against a real bare git remote — exercises auto-push, dirty-tree recovery, push-failure cap, and same-task conflicts), `test_gcal.py` (the calendar mirror's reconcile logic against a fake API, plus the store hook). `python3 -m pytest`. They use temp directories and won't touch your real gist or your calendar.
+- **Config.** `lazy/config.json` ships with the snarky message catalog (`completion_messages`, `empty_state_messages`, `add_echo_messages`, `enable_colors`). User overrides live in `~/.config/lazy/config.json` (`gist_id`, `gist_url`, `repo_path`, `pull_freshness_seconds`, `auto_push`, `calendar_sync`, `calendar_keyring_service`).
 - **Rolling back.** Two tiers, both unhurried.
   - **Precision tool: undo a bad commit.** Lazy's gist clone is a real git repo. `git -C ~/.local/share/lazy/repo log --oneline` shows your task history; `git -C ~/.local/share/lazy/repo reset --hard <good-sha> && git -C ~/.local/share/lazy/repo push --force-with-lease` returns the gist to a known-good state. You lose only what happened between the bad commit and now.
   - **Floor: nuke and pave.** `git checkout v2026.05.05` puts the lazy code back in the SQLite era; `mv ~/gemini/lazy/lazy.db.migrated ~/gemini/lazy/lazy.db` restores the data file that was preserved on migration day (2026-05-08). You lose everything added since 2026-05-08, but you also lose any new bug that came with the gist storage.

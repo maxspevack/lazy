@@ -268,7 +268,7 @@ def cmd_backend(args):
     """Print configured backend, repo state, and last-pull info."""
     import time
     import git_ops
-    from store import read_user_config
+    from store import calendar_service, read_user_config
     cfg = read_user_config()
     home = os.environ.get('LAZY_HOME')
     if home:
@@ -296,6 +296,8 @@ def cmd_backend(args):
         with open(tasks_path) as f:
             n = sum(1 for line in f if line.strip())
         print(f"task lines:  {n}")
+    service = calendar_service(cfg)
+    print(f"calendar:    {'Lazy (keyring service ' + service + ')' if service else 'off'}")
 
 
 # Dispatch table for the standard CRUD commands.

@@ -17,6 +17,7 @@ import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
+import gcal
 import git_ops
 
 TASKS_FILE = 'tasks.jsonl'
@@ -48,8 +49,10 @@ def _warn(msg):
 
 class Store:
     def __init__(self, repo_path, auto_push=True, pull_freshness=DEFAULT_FRESHNESS,
-                 no_remote=False):
+                 no_remote=False, calendar=None):
         self.path = repo_path
+        # Keyring service holding Google OAuth creds; None disables the mirror.
+        self.calendar = calendar
         self.tasks_path = os.path.join(repo_path, TASKS_FILE)
         self.auto_push = auto_push and not no_remote
         self.pull_freshness = pull_freshness
@@ -276,6 +279,14 @@ class Store:
             yield tasks
             self._write(tasks)
             self._commit_and_push(message() if callable(message) else message)
+            self._mirror(tasks)
+
+    def _mirror(self, tasks):
+        """Mirror the pending set onto Google Calendar (see gcal.py). Runs
+        inside the write lock so two writers cannot race to create the same
+        event. Warns and returns on any failure; the write is already done."""
+        if self.calendar:
+            gcal.sync(tasks, self.calendar)
 
     def get_tasks(self, mode):
         self._ensure_synced()
@@ -367,6 +378,8 @@ class Store:
         ok, err = git_ops.push(self.path)
         if not ok:
             _warn(f"push failed ({err})")
+            return
+        self._mirror(self._read())
 
 
 # ---- factory ----
@@ -414,4 +427,12 @@ def open_store():
         auto_push=cfg.get('auto_push', DEFAULT_AUTO_PUSH),
         pull_freshness=cfg.get('pull_freshness_seconds', DEFAULT_FRESHNESS),
         no_remote=no_remote,
+        calendar=calendar_service(cfg),
     )
+
+
+def calendar_service(cfg):
+    """Keyring service for the calendar mirror, or None when it is off."""
+    if not cfg.get('calendar_sync'):
+        return None
+    return cfg.get('calendar_keyring_service') or gcal.DEFAULT_KEYRING_SERVICE
