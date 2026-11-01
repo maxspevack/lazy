@@ -1,3 +1,66 @@
+# Lazy CLI Release Notes: v2026.10.31
+
+*A task deleted from a phone, in a parking lot, and some minutes later the terminal in the other room had stopped mentioning it. Nobody typed anything. We are learning to live with this.*
+
+The user asked for the calendar. Not a calendar export, not a feed, not a "view": the actual Google Calendar, the one with the dentist in it, and he wanted it to go both ways. Tasks should appear on it. Things he did to it should come back. He said this on a Saturday and then went to look at his calendar, and by the evening the obligations were there, haunting a calendar called **Lazy**, which is the only name we considered.
+
+Along the way Google required a published privacy policy and terms of service before it would let one man read his own appointments. We published them. They are short. One of them opens with "This page exists because Google requires one," which is the most honest sentence on the internet.
+
+Identity: Haunted (previously: unbothered).
+
+### 👻 The Calendar Talks Back
+
+Every pending task is an all-day event on its due date, on its own calendar, so the rest of your life is never touched. That part was the afternoon. The evening was the other direction, which the user suspected was impossible and which turned out to be one idea: lazy leaves a stamp on every event it writes, the task id plus the date and title it last wrote, and that stamp is the memory. Each sync lists the whole calendar, deleted events included, and asks three questions per task. Did the task change since the stamp? Then lazy wins and the event is rewritten. Did the event change and the task did not? Then you moved it with your thumb and the task follows. Is the event gone? Then you deleted it, and the task is done, because deleting a thing from a calendar is the most honest gesture a person can make before noon.
+
+Events you create on the Lazy calendar become tasks, titled and dated from the event, then stamped so they are lazy's from then on. Recurring events are ignored; one task cannot be a series, that would be a lifestyle. A timed event stays timed until lazy itself moves it, at which point it becomes all-day, because lazy does not do hours.
+
+Inbound edits are ordinary writes. They commit to the gist like anything typed at a terminal, so the phone edit in the parking lot reaches every machine you own, and the gist log says exactly what came in from where:
+
+```
+calendar sync (gcal: 1 adopted)
+calendar sync (gcal: 1 edited)
+calendar sync (gcal: 1 done)
+```
+
+Credentials never touch this repo, the gist, or a file. Lazy reads the three OAuth values a `google-workspace-mcp` setup already keeps in your OS keyring and asks for nothing else. If the keyring is empty, lazy says so in one stderr line and gets on with your task. The calendar is optional, like most things.
+
+### 🕰️ The Timer (Vigilance, Outsourced)
+
+Google does not call you when a calendar changes unless you own a public web server, and we do not, on principle. So lazy looks: on every write, on `lazy sync`, and, if you install two small systemd files, every ten minutes on the one machine you leave on. The gist carries what it finds to the rest. One timer is enough. Two would be trying.
+
+The timer is honest. `lazy sync` now exits 1 when any leg fails, so a failed sync shows in `systemctl --user --failed` instead of glowing green while silently doing nothing, which is a failure mode this project is otherwise quite fond of.
+
+### ⏱️ Reviewed, Then Timed
+
+The Distinguished Engineer reviewed the day's code before anyone said "release," arrived with reproduction scripts, and was right about three things. A machine whose push was delayed could have its new task marked done by the other machine's timer, which had deleted the orphan event as stale and then read its own tombstone as yours. A flaky stamp could mint a phantom task every ten minutes. And Google had created the Lazy calendar in UTC, so an event dragged to five in the evening would have moved its task to tomorrow. All three are fixed; lazy now signs its own cancellations, and a signed tombstone never counts. He was wrong about one thing, a guard the tests threw out, which we are told is a good day for him. Then the live receipt found the bug he had not: ids are reused after `lazy rm`, and a new task was completed on its first sync by its predecessor's tombstone. A tombstone now completes a task only if it still reads the way the task does.
+
+He came back with a stopwatch, clocked every git process, keyring lookup, and Google call in place against the real gist and the real calendar, and ranked twelve changes by milliseconds saved against risk. We did seven, the two that depend on Google's manners only after a receipt.
+
+| | before | after |
+|---|---|---|
+| `lazy`, warm | 60-80 ms | 30 ms |
+| `lazy a` | 3.2 s | 2.9 s, or 1.2 s with the calendar handed to the timer |
+| `lazy rm` | 4.1 s | 2.65 s, or 1.2 s likewise |
+
+A warm read spawns no git process and no longer loads all of `urllib` to print three lines. A commit that committed nothing no longer pushes, which `lazy sync` had been paying twice. A cancellation is one call, not two. The calendar's id is remembered instead of looked up. And `calendar_sync_on_write: false` lets a machine that runs the timer leave the calendar to it, so a write costs only its git push, for people who keep a machine on and have places to be.
+
+### 📜 The Documentation Has Been Re-Voiced
+
+The Creative Director read the README and found one trespasser: the calendar section had been written by an engineer, in bold labels, at noon. It has been rewritten in the house voice with every fact intact, the duplicate calendar emoji has been retired in favour of a ghost, and the command table finally admits that `lazy sync` exists. Nothing above or below it was touched. That is the brand. Leave it alone.
+
+### 🪦 What We Did Not Do
+
+*   **A token on disk.** The user's rule, and the reviewer agreed: the keyring is the only store. Every Google session pays two hundred milliseconds to mint a token, and that is the price of not having a little secret under the mattress.
+*   **A background push.** A write is not done until it is pushed. Nobody gets to lose a task to a process that was still "about to."
+*   **Keep-alive connections, deferred pushes during triage, a daemon, sync tokens, webhooks.** Each saves under half a second on a path the timer switch removes entirely, and each adds code to the one module that must never raise into a write. The reviewer listed eleven things he would not optimise. We agreed with all eleven, which has never happened before and will not happen again.
+*   **Verification by Google.** The consent screen says the app is unverified. It is. It has one user, and he wrote the privacy policy himself.
+
+---
+
+The user has a calendar that nags, a terminal that listens, and a timer that confesses when it fails. He deleted something from his phone to see what would happen, and what happened was nothing he had to do. The Distinguished Engineer left with his reproduction scripts. The Creative Director left with the ghost. The chaise, as ever, remains.
+
+`syscall(sleep, until=interrupt)`.
+
 # Lazy CLI Release Notes: v2026.08.05
 
 *Eighty-nine days of silence. The chaise has developed a permanent depression in the shape of a person. This is what winning looks like.*
