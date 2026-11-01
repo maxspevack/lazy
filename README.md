@@ -43,16 +43,51 @@ It’s the elite way to procrastinate. The robots do the tracking; you do the re
 
 ---
 
-## 📅 The Calendar Mirror (Optional, Like Most Things)
+## 📅 The Calendar (Optional, Like Most Things)
 
-If you want your obligations to haunt the same Google Calendar as everything else, lazy will mirror them there. One-way: lazy is the truth, the calendar is the reflection. Every pending task becomes an all-day event on its due date, on a dedicated calendar called **Lazy** (created the first time; toggle it off in Google Calendar's sidebar on days you prefer denial). Add, rename, move, bump, push, done, delete — every write re-reconciles the whole calendar against your pending list, so a sync that fails (plane, tunnel, the void) heals itself on the next write. Nothing you hand-place on any *other* calendar is ever touched; untagged events on the Lazy calendar are left alone too.
+If you want your obligations to haunt the same Google Calendar as everything else, lazy will keep a calendar called **Lazy** in step with your pending list — and keep your pending list in step with the calendar. Lazy is the record; the calendar is a view of it you are allowed to touch.
+
+**Outbound.** Every pending task is an all-day event on its due date. Add, rename, move, bump, push, done, delete — every write reconciles the whole calendar, so a sync that fails (plane, tunnel, the void) heals itself on the next write.
+
+**Inbound.** Edit the Lazy calendar the way a person does and lazy follows on its next sync:
+
+| You, in Google Calendar | Lazy |
+|---|---|
+| Drag an event to another day, or rename it | The task moves or is renamed |
+| Delete an event | The task is done |
+| Create an event on the Lazy calendar | A new task, titled and dated from the event |
+| Edit the same task in lazy *and* on the calendar before a sync | Lazy wins, even over a deletion: the event comes back |
+
+Recurring events are ignored (one task cannot be a series). A timed event stays timed until lazy itself moves it, at which point it becomes all-day. Nothing on any *other* calendar is ever touched, and the Lazy calendar should hold nothing but tasks — anything you put there becomes one. That is the feature.
+
+**When lazy looks.** On every write, on `lazy sync`, and — if you install the timer — every ten minutes on one always-on machine. The gist carries what it finds to every other machine, so one timer is enough:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/lazy-sync.* ~/.config/systemd/user/     # ExecStart assumes ~/.local/bin/lazy; edit if yours lives elsewhere
+systemctl --user daemon-reload
+systemctl --user enable --now lazy-sync.timer
+systemctl --user list-timers lazy-sync.timer        # next run, last run
+systemctl --user --failed                           # a failed sync shows here; lazy sync exits 1 when any leg fails
+journalctl --user -u lazy-sync --since today        # what it did
+```
+
+Safe to switch on for every machine you use: lazy marks its own deletions, so a task added on one machine while its push was delayed is never mistaken for one you deleted on the calendar. One timer is still enough.
+
+**Switching it on.** Per machine; machines without it keep working, they just don't talk to the calendar:
 
 ```jsonc
-// ~/.config/lazy/config.json — per machine; machines without it keep working, they just don't mirror
+// ~/.config/lazy/config.json
 { "calendar_sync": true }
 ```
 
-Credentials are the three OAuth values a `google-workspace-mcp` setup already keeps in your OS keyring (`client_id`, `client_secret`, `refresh_token`, under service `google-workspace-mcp`; set `calendar_keyring_service` if yours differs). No new packages, no token files. If the keyring is empty, lazy says so in one stderr line and gets on with your task — the calendar never blocks the chaise. Dragging an event around in Google Calendar changes nothing: move the task in lazy, and the calendar follows.
+Every write then reconciles the calendar inline, which costs it a Google session (two to three seconds). If a machine runs the timer, you can hand the calendar to it instead and a write costs only its git push:
+
+```jsonc
+{ "calendar_sync": true, "calendar_sync_on_write": false }   // calendar catches up on the next tick, at most ten minutes
+```
+
+**Credentials.** Lazy reads the three OAuth values a `google-workspace-mcp` setup already keeps in your OS keyring — `client_id`, `client_secret`, `refresh_token`, under service `google-workspace-mcp` (set `calendar_keyring_service` if yours differs) — via `secret-tool` on Linux or `security` on macOS. Nothing is written to this repo, to the gist, or to any file: no token caches, no client JSON. If the keyring is empty, lazy says so in one stderr line and gets on with your task; the calendar never blocks the chaise. The token needs the `https://www.googleapis.com/auth/calendar` scope.
 
 ## 🏛️ The CLI (For when the smelling salts kick in)
 
@@ -173,13 +208,13 @@ If `parse_date` can't make sense of a string, it raises a `ValueError`. The CLI 
 
 ## ⚙️ The Boring Stuff (Systems)
 
-- **Persistence.** Tasks live in a **private GitHub Gist** as JSONL — one task per line. Your machine keeps a local git clone at `~/.local/share/lazy/repo` and lazy pulls/pushes silently around every operation. Reads use a 30-second freshness window so a quick `lazy l` followed by `lazy d 14` doesn't hammer the API. Writes always pull-then-push. If push fails (network down, gist deleted, the universe), the commit stays local and tries again next time. After ten consecutive failures lazy whispers one warning to stderr and continues.
+- **Persistence.** Tasks live in a **private GitHub Gist** as JSONL — one task per line. Your machine keeps a local git clone at `~/.local/share/lazy/repo` and lazy pulls/pushes silently around every operation. Reads and writes use a 30-second freshness window so a quick `lazy l` followed by `lazy d 14` doesn't hammer the API; a write on a base that went stale inside that window is caught by the push being rejected, and lazy rebases. If push fails (network down, gist deleted, the universe), the commit stays local and tries again next time. After ten consecutive failures lazy whispers one warning to stderr and continues.
 - **Requirements.** `git` (>= 2.34) and `gh` (authenticated). Run `gh auth login` once per machine. The first invocation of `lazy init` creates the gist and clones it; everything else is automatic.
 - **Privacy.** A "secret" gist is URL-private — anyone with the URL can read it. Your URL lives in `~/.config/lazy/config.json` (mode `0600`). Treat the URL like a password. Don't paste it in screenshots, don't post it in Slack, don't read it aloud at conferences.
 - **Manual editing.** You can edit the gist directly in GitHub's web UI if the mood strikes — the only rule is that each non-blank line must be valid JSON with an `id` field. Lines without `id` are silently ignored. Lazy's next pull will pick up your edits.
 - **Overrides for the curious.** `LAZY_HOME=/path/to/clone` redirects the local clone (used by tests). `LAZY_NO_REMOTE=1` skips push/pull entirely (used by tests, occasionally for plane mode).
-- **Verification.** Five test files. `test_logic.py` (parser + Store unit), `test_lazy.py` (CLI subprocess), `test_mcp.py` (JSON-RPC over stdio), `test_sync.py` (integration tests against a real bare git remote — exercises auto-push, dirty-tree recovery, push-failure cap, and same-task conflicts), `test_gcal.py` (the calendar mirror's reconcile logic against a fake API, plus the store hook). `python3 -m pytest`. They use temp directories and won't touch your real gist or your calendar.
-- **Config.** `lazy/config.json` ships with the snarky message catalog (`completion_messages`, `empty_state_messages`, `add_echo_messages`, `enable_colors`). User overrides live in `~/.config/lazy/config.json` (`gist_id`, `gist_url`, `repo_path`, `pull_freshness_seconds`, `auto_push`, `calendar_sync`, `calendar_keyring_service`).
+- **Verification.** Five test files. `test_logic.py` (parser + Store unit), `test_lazy.py` (CLI subprocess), `test_mcp.py` (JSON-RPC over stdio), `test_sync.py` (integration tests against a real bare git remote — exercises auto-push, dirty-tree recovery, push-failure cap, and same-task conflicts), `test_gcal.py` (the two-way calendar reconcile against a fake API, every store mutation driven through it, and calendar-side edits landing in the file). `python3 -m pytest`. They use temp directories and won't touch your real gist or your calendar.
+- **Config.** `lazy/config.json` ships with the snarky message catalog (`completion_messages`, `empty_state_messages`, `add_echo_messages`, `enable_colors`). User overrides live in `~/.config/lazy/config.json` (`gist_id`, `gist_url`, `repo_path`, `pull_freshness_seconds`, `auto_push`, `calendar_sync`, `calendar_sync_on_write`, `calendar_keyring_service`).
 - **Rolling back.** Two tiers, both unhurried.
   - **Precision tool: undo a bad commit.** Lazy's gist clone is a real git repo. `git -C ~/.local/share/lazy/repo log --oneline` shows your task history; `git -C ~/.local/share/lazy/repo reset --hard <good-sha> && git -C ~/.local/share/lazy/repo push --force-with-lease` returns the gist to a known-good state. You lose only what happened between the bad commit and now.
   - **Floor: nuke and pave.** `git checkout v2026.05.05` puts the lazy code back in the SQLite era; `mv ~/gemini/lazy/lazy.db.migrated ~/gemini/lazy/lazy.db` restores the data file that was preserved on migration day (2026-05-08). You lose everything added since 2026-05-08, but you also lose any new bug that came with the gist storage.

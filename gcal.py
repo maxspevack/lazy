@@ -1,16 +1,22 @@
-"""One-way mirror of pending tasks onto a dedicated Google Calendar.
+"""Two-way sync between pending tasks and a dedicated Google Calendar.
 
-Lazy is the source of truth. After every write, the pending set is
-reconciled against a calendar named "Lazy" (created on first use): one
-all-day event per pending task on its due date, tagged with the task id in a
-private extended property. Done, deleted, moved, or renamed tasks have their
-event deleted, moved, or renamed on the next reconcile. Events on that
-calendar without a tag are left alone; other calendars are never touched.
+Lazy is the record. The calendar named "Lazy" (created on first use) is a
+view of it that you may also edit. Every reconcile lists the whole calendar,
+deleted events included, and merges three ways per task using the stamp
+lazy leaves on each event: the task id plus the date and title it last wrote.
 
-Credentials are the three OAuth values a google-workspace MCP already keeps
-in the platform secret store (client_id, client_secret, refresh_token) under
-a configurable service name. No third-party packages: urllib and the OS
-keyring CLI. Every failure is one stderr line; the task write stands.
+  task changed since the stamp      -> the event is rewritten (lazy wins)
+  event changed, task did not       -> the task is moved / renamed
+  event you deleted on the calendar -> the task is done, if the task still
+                                       reads as the event did (lazy marks its
+                                       own deletions, so those never count)
+  untagged event on the calendar    -> a new task, then the event is stamped
+  task done or deleted in lazy      -> the event is deleted
+
+Credentials are the three OAuth values a google-workspace MCP keeps in the
+OS keyring (client_id, client_secret, refresh_token) under a configurable
+service name. Nothing is stored in this repo or in the gist. urllib only.
+Every failure is one stderr line; the task write it rides on still lands.
 """
 
 import json
@@ -19,7 +25,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 CALENDAR_NAME = 'Lazy'
 DEFAULT_KEYRING_SERVICE = 'google-workspace-mcp'
@@ -97,17 +103,27 @@ class Api:
 
 
 def find_or_create_calendar(api, name=CALENDAR_NAME):
-    items = api('GET', '/users/me/calendarList', minAccessRole='writer',
+    # Owner only: a calendar someone shared with you under this name is theirs.
+    items = api('GET', '/users/me/calendarList', minAccessRole='owner',
                 maxResults=250).get('items', [])
     hits = [c['id'] for c in items if c.get('summary') == name]
     if len(hits) > 1:
         raise CalendarSyncError(f"{len(hits)} calendars named '{name}'; rename all but one")
     if hits:
         return hits[0]
-    return api('POST', '/calendars', {'summary': name})['id']
+    # The calendar's zone is the zone timed events are listed in; a secondary
+    # calendar created without one is UTC, which shifts an evening event to
+    # the next day. Inherit the primary's.
+    zone = api('GET', '/calendars/primary').get('timeZone')
+    return api('POST', '/calendars', {'summary': name, 'timeZone': zone})['id']
 
 
-# ---- reconcile ----
+# ---- events ----
+
+def _stamp(task):
+    return {'lazy_id': str(task['id']), 'lazy_due': task['due_date'],
+            'lazy_desc': task['description']}
+
 
 def _event_for(task):
     due = date.fromisoformat(task['due_date'])
@@ -117,21 +133,49 @@ def _event_for(task):
         'start': {'date': due.isoformat()},
         'end': {'date': (due + timedelta(days=1)).isoformat()},   # exclusive end
         'transparency': 'transparent',                            # never "busy"
-        'extendedProperties': {'private': {'lazy_id': str(task['id'])}},
+        'extendedProperties': {'private': _stamp(task)},
     }
+
+
+def _private(event):
+    return (event.get('extendedProperties') or {}).get('private') or {}
 
 
 def _lazy_id(event):
     try:
-        return int(event.get('extendedProperties', {}).get('private', {}).get('lazy_id'))
+        return int(_private(event).get('lazy_id'))
     except (TypeError, ValueError):
         return None
+
+
+def _event_date(event):
+    """YYYY-MM-DD of an all-day event, or the wall-clock day of a timed one
+    as the calendar serializes it (in the calendar's own zone). None if absent."""
+    start = event.get('start') or {}
+    try:
+        if start.get('date'):
+            return date.fromisoformat(start['date']).isoformat()
+        return datetime.fromisoformat(start['dateTime']).date().isoformat()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _cancelled(event):
+    return event.get('status') == 'cancelled'
+
+
+def _adoptable(event):
+    """An event you created by hand on the Lazy calendar. One task cannot be a
+    series, so recurring events are left alone."""
+    return (not _cancelled(event) and _lazy_id(event) is None
+            and _event_date(event) is not None
+            and 'recurrence' not in event and not event.get('recurringEventId'))
 
 
 def _list_events(api, cal_id):
     events, page_token = [], None
     while True:
-        params = {'maxResults': 2500, 'showDeleted': 'false'}
+        params = {'maxResults': 2500, 'showDeleted': 'true'}
         if page_token:
             params['pageToken'] = page_token
         page = api('GET', f'/calendars/{cal_id}/events', **params)
@@ -142,58 +186,136 @@ def _list_events(api, cal_id):
 
 
 def _delete(api, cal_id, event_id):
+    """One PATCH: cancel the event and mark it as lazy's doing. Cancelling
+    by status is what events.delete does for a single event, and the
+    tombstone keeps its private properties (receipt 2026-10-31). The marker
+    is how the next reconcile tells lazy's own deletion from yours: without
+    it, a task that reappears (a replica's late push, a hand edit) would be
+    read as "deleted on the calendar" and marked done."""
     try:
-        api('DELETE', f'/calendars/{cal_id}/events/{event_id}')
+        api('PATCH', f'/calendars/{cal_id}/events/{event_id}',
+            {'status': 'cancelled', 'extendedProperties': {'private': {'lazy_deleted': '1'}}})
     except CalendarSyncError as e:
         if e.code not in (404, 410):   # already gone is the outcome we wanted
             raise
 
 
-def reconcile(api, cal_id, tasks):
-    """Make the calendar match the pending tasks. Returns (created, updated, deleted)."""
-    pending = {t['id']: t for t in tasks
-               if t.get('status') == 'pending' and t.get('due_date')}
-    current = {}
+# ---- reconcile ----
+
+def reconcile(api, cal_id, tasks, add_task):
+    """Merge the calendar into `tasks` (mutated in place) and `tasks` into the
+    calendar. add_task(description, due_iso) appends a task and returns it.
+    Returns counts: events created/updated/deleted, tasks adopted/edited/done."""
+    n = dict(created=0, updated=0, deleted=0, adopted=0, edited=0, done=0)
+    live, gone = {}, {}
     for ev in _list_events(api, cal_id):
         lid = _lazy_id(ev)
-        if lid is not None:            # untagged events are not ours; never touched
-            current.setdefault(lid, []).append(ev)
+        if lid is None:
+            if _adoptable(ev):
+                task = add_task(ev.get('summary') or '(untitled)', _event_date(ev))
+                try:
+                    api('PATCH', f"/calendars/{cal_id}/events/{ev['id']}",
+                        {'extendedProperties': {'private': _stamp(task)}})
+                except CalendarSyncError:
+                    tasks.remove(task)     # unstamped means not adopted; retry next pass
+                    raise
+                ev['extendedProperties'] = {'private': _stamp(task)}
+                live[task['id']] = [ev]    # now ours; the loop below must not recreate it
+                n['adopted'] += 1
+        elif _cancelled(ev):
+            if 'lazy_deleted' not in _private(ev):
+                gone[lid] = ev             # deleted by you, not by lazy
+        else:
+            live.setdefault(lid, []).append(ev)
 
-    created = updated = deleted = 0
+    pending = {t['id']: t for t in tasks
+               if t.get('status') == 'pending' and t.get('due_date')}
     for lid, task in pending.items():
-        want = _event_for(task)
-        events = current.get(lid, [])
+        want = (task['due_date'], task['description'])
+        events = live.get(lid)
         if not events:
-            api('POST', f'/calendars/{cal_id}/events', want)
-            created += 1
+            tomb = _private(gone.get(lid, {}))
+            if (tomb.get('lazy_due'), tomb.get('lazy_desc')) == want:
+                # You deleted the event of this task as it stands: done.
+                # A tombstone that reads differently is an earlier bearer of
+                # the id (ids are reused after `lazy rm`) or predates an edit
+                # lazy made since; either way the task gets a fresh event.
+                task['status'] = 'done'
+                n['done'] += 1
+            else:
+                api('POST', f'/calendars/{cal_id}/events', _event_for(task))
+                n['created'] += 1
             continue
-        keep, dupes = events[0], events[1:]
-        if any(keep.get(k) != want[k] for k in ('summary', 'start', 'end')):
-            # PUT, not PATCH: a hand-converted timed event must come back
-            # all-day, and PATCH merges start/end instead of replacing them.
-            api('PUT', f"/calendars/{cal_id}/events/{keep['id']}", want)
-            updated += 1
-        for ev in dupes:               # a run that died between insert and exit left two
-            _delete(api, cal_id, ev['id'])
-            deleted += 1
-    for lid, events in current.items():
+        ev, dupes = events[0], events[1:]
+        priv = _private(ev)
+        base = (priv.get('lazy_due'), priv.get('lazy_desc'))
+        now = (_event_date(ev), ev.get('summary') or '')
+        if None in base or want != base:
+            # Lazy changed since it last wrote (or never stamped): lazy wins.
+            # PUT, not PATCH: a hand-converted timed event comes back all-day,
+            # and PATCH merges start/end instead of replacing them.
+            api('PUT', f"/calendars/{cal_id}/events/{ev['id']}", _event_for(task))
+            n['updated'] += 1
+        elif now[0] is not None and now != base:
+            # You edited the event: the task follows, and only the stamp moves,
+            # so a timed event stays timed. An event with no start is left alone.
+            task['due_date'], task['description'] = now[0], now[1] or task['description']
+            api('PATCH', f"/calendars/{cal_id}/events/{ev['id']}",
+                {'extendedProperties': {'private': _stamp(task)}})
+            n['edited'] += 1
+        for dup in dupes:                  # two machines raced to create; keep one
+            _delete(api, cal_id, dup['id'])
+            n['deleted'] += 1
+    # Done or removed in lazy, or a task another machine added whose push has
+    # not reached this file yet. The marker _delete leaves makes the second
+    # case harmless: once the task arrives, its event is simply recreated.
+    for lid, events in live.items():
         if lid not in pending:
             for ev in events:
                 _delete(api, cal_id, ev['id'])
-                deleted += 1
-    return created, updated, deleted
+                n['deleted'] += 1
+    return n
 
 
-def sync(tasks, service=DEFAULT_KEYRING_SERVICE, warn=None):
-    """Reconcile and report. Never raises: the task write this follows is
-    already committed, and a calendar problem must not undo it. Every full
-    reconcile re-derives the whole diff, so a skipped sync heals on the next
-    write. Returns (created, updated, deleted), or None when skipped."""
+def _cached_calendar(api, cache_path, tasks, add_task):
+    """Reconcile against the calendar id remembered in cache_path, looking it
+    up (one calendarList call) only when there is no cache or the cached
+    calendar is gone (Google answers 404 for a deleted calendar; receipt
+    2026-10-31). The id is per clone, next to the pull sentinel; it is not a
+    credential. With a cached id the two-calendars-named-Lazy check does not
+    run, which is fine: the id itself is unambiguous."""
+    cal_id = None
+    if cache_path:
+        try:
+            with open(cache_path) as f:
+                cal_id = f.read().strip() or None
+        except OSError:
+            pass
+    if cal_id:
+        try:
+            return reconcile(api, cal_id, tasks, add_task)
+        except CalendarSyncError as e:
+            if e.code != 404:
+                raise
+    cal_id = find_or_create_calendar(api)
+    if cache_path:
+        try:
+            with open(cache_path, 'w') as f:
+                f.write(cal_id + '\n')
+        except OSError:
+            pass
+    return reconcile(api, cal_id, tasks, add_task)
+
+
+def sync(tasks, add_task, service=DEFAULT_KEYRING_SERVICE, warn=None, cache_path=None):
+    """Reconcile and report. Never raises: the task write this rides on must
+    land whatever the calendar does. Every reconcile re-derives the whole
+    diff, so a skipped one heals on the next. Returns the counts, or None."""
     if warn is None:
         warn = lambda m: sys.stderr.write(f"lazy: calendar sync skipped: {m}\n")
     try:
         api = Api(access_token(credentials(service)))
-        return reconcile(api, find_or_create_calendar(api), tasks)
+        return _cached_calendar(api, cache_path, tasks, add_task)
     except CalendarSyncError as e:
         warn(str(e))
     except Exception as e:             # a bug here must not break `lazy add`

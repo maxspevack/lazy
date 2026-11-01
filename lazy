@@ -6,7 +6,6 @@ Philosophy: "Why do today what you can push to tomorrow?"
 
 __version__ = "v2026.08.05"
 
-import argparse
 import json
 import os
 import random
@@ -260,8 +259,11 @@ def cmd_triage(args, store):
 
 
 def cmd_sync(args, store):
-    store.sync()
-    print("Sync complete.")
+    inbound = store.sync()
+    if inbound is None:
+        print("Sync failed; see the warning above.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Sync complete. From the calendar: {inbound}." if inbound else "Sync complete.")
 
 
 def cmd_backend(args):
@@ -321,6 +323,7 @@ BOOTSTRAP_COMMANDS = {'init', 'backend', 'migrate-from-sqlite'}
 
 
 def _build_parser():
+    import argparse   # ~8 ms the bare `lazy` read never pays
     usage = """
   lazy                      List tasks due today or overdue
   lazy <desc> [date]        Add a task (e.g., 'lazy Buy milk tmw')
@@ -405,12 +408,7 @@ def _maybe_inject_add(parser):
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == 'help':
-        sys.argv[1] = '--help'
-
-    parser = _build_parser()
-
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1:           # the common case, kept ahead of argparse
         try:
             store = open_store()
         except StoreNotInitialized as e:
@@ -419,6 +417,10 @@ def main():
         print_tasks(store.get_tasks('today'))
         return
 
+    if sys.argv[1] == 'help':
+        sys.argv[1] = '--help'
+
+    parser = _build_parser()
     _maybe_inject_add(parser)
     args = parser.parse_args()
 

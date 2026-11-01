@@ -3,7 +3,8 @@
 Replaces the old SQLite db.py. The repo path holds a clone of a private
 gist; tasks live in tasks.jsonl, one JSON object per line.
 
-Reads pull (with a freshness window). Writes pull, mutate, commit, push.
+Reads pull (with a freshness window). Writes pull, mutate, reconcile the
+Google Calendar if enabled (gcal.py; it may add inbound edits), commit, push.
 On push reject, retry with pull --rebase. Conflicts surface to stderr.
 """
 
@@ -12,13 +13,15 @@ import json
 import re
 import os
 import sys
-import tempfile
 import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-import gcal
 import git_ops
+
+# tempfile (write path) and gcal (calendar path, which drags in urllib/ssl)
+# are imported where they are used: a read pays neither.
+DEFAULT_KEYRING_SERVICE = 'google-workspace-mcp'
 
 TASKS_FILE = 'tasks.jsonl'
 DEFAULT_REPO = os.path.expanduser('~/.local/share/lazy/repo')
@@ -49,10 +52,14 @@ def _warn(msg):
 
 class Store:
     def __init__(self, repo_path, auto_push=True, pull_freshness=DEFAULT_FRESHNESS,
-                 no_remote=False, calendar=None):
+                 no_remote=False, calendar=None, calendar_on_write=True):
         self.path = repo_path
-        # Keyring service holding Google OAuth creds; None disables the mirror.
+        # Keyring service holding Google OAuth creds; None = no calendar sync.
         self.calendar = calendar
+        # False: writes skip the reconcile and leave it to `lazy sync` (the
+        # timer); a write then costs a git round trip instead of a Google one.
+        self.calendar_on_write = calendar_on_write
+        self.last_inbound = ''
         self.tasks_path = os.path.join(repo_path, TASKS_FILE)
         self.auto_push = auto_push and not no_remote
         self.pull_freshness = pull_freshness
@@ -119,6 +126,12 @@ class Store:
         self._record_push(ok)
         return ok
 
+    def _sentinel_fresh(self):
+        try:
+            return time.time() - os.path.getmtime(self._sentinel) < self.pull_freshness
+        except FileNotFoundError:
+            return False
+
     def _ensure_synced(self, force_pull=False):
         """Bring local and origin into agreement. Silent on failure (lazy ethos).
 
@@ -126,12 +139,20 @@ class Store:
           was killed mid-commit), commit the orphan so we operate on a clean
           base without losing it.
         - If local has unpushed commits, flush them (with rebase retry).
-        - Otherwise, pull if forced (writes always force) or freshness expired.
+        - Otherwise, pull if forced or freshness expired.
 
         On any network or rebase failure: stay silent, leave state as-is, try
         again next invocation. The user is never asked to do anything. After
         N consecutive push failures we surface ONE warning (see _record_push).
         """
+        # Fresh sentinel and no rebase in flight: nothing to do, and the four
+        # git subprocesses below are the whole cost of a warm read. The rebase
+        # check stays in front (two stats, no subprocess) so an interrupted
+        # rebase is recovered on the next invocation, not after 30 seconds.
+        if (not force_pull and self._sentinel_fresh()
+                and not any(os.path.exists(os.path.join(self._state_dir, d))
+                            for d in ('rebase-merge', 'rebase-apply'))):
+            return
         if self.no_remote or not git_ops.has_remote(self.path):
             return
         # A repo left mid-rebase by an earlier interrupted run is unusable: the
@@ -145,7 +166,7 @@ class Store:
             # a failed commit had left in the working tree: the user was told
             # "Added", and the next invocation moved it somewhere no lazy
             # command lists. A dirty tasks.jsonl is valid content, not debris.
-            ok, err = git_ops.add_and_commit(
+            ok, err, _ = git_ops.add_and_commit(
                 self.path, TASKS_FILE, 'lazy: recovered orphaned write')
             if not ok:
                 _warn(f"could not commit recovered write ({err})")
@@ -153,21 +174,19 @@ class Store:
             self._attempt_push()
             self._touch_sentinel()
             return
-        if not force_pull:
-            try:
-                if time.time() - os.path.getmtime(self._sentinel) < self.pull_freshness:
-                    return
-            except FileNotFoundError:
-                pass
+        if not force_pull and self._sentinel_fresh():
+            return
         git_ops.pull_ff(self.path)
         self._touch_sentinel()
 
     def _commit_and_push(self, message):
-        ok, err = git_ops.add_and_commit(self.path, TASKS_FILE, message)
+        ok, err, committed = git_ops.add_and_commit(self.path, TASKS_FILE, message)
         if not ok:
             _warn(f"commit failed ({err})")
             return
-        if not self.auto_push or not git_ops.has_remote(self.path):
+        # Nothing committed, nothing to push: a no-op write cycle (a reconcile
+        # that found no inbound change) used to cost a full push round trip.
+        if not committed or not self.auto_push or not git_ops.has_remote(self.path):
             return
         # Same retry-on-reject path as _ensure_synced; both go through
         # _attempt_push so failure tracking is unified.
@@ -213,6 +232,7 @@ class Store:
         return tasks
 
     def _write(self, tasks):
+        import tempfile
         tasks = sorted(tasks, key=lambda t: t['id'])
         directory = os.path.dirname(self.tasks_path)
         os.makedirs(directory, exist_ok=True)
@@ -267,26 +287,63 @@ class Store:
 
     @contextmanager
     def _writing(self, message):
-        """Read-mutate-write-commit-push lifecycle for any mutation. The
+        """Read-mutate-sync-write-commit-push lifecycle for any mutation. The
         message can be a string or a callable evaluated after the mutation
         (so commit messages can include counts computed during the mutation).
         add_and_commit is a no-op when the file content didn't actually
         change, so methods that find nothing to do incur a wasted file
-        rewrite but no spurious commit."""
+        rewrite but no spurious commit.
+
+        The calendar round trip sits between the mutation and the write so
+        that calendar-side edits land in the same commit. The price: the
+        mutation is not on disk until the network answers or times out, so
+        an interrupt in that window (Ctrl-C, a stopped unit, an MCP client
+        disconnect) drops it with a traceback, never silently.
+
+        Writes pull on the same freshness window as reads: a base up to 30 s
+        stale is caught by the push being rejected, and _attempt_push rebases.
+        Recovery of orphans, unpushed commits, and interrupted rebases still
+        runs on every write."""
         with self._locked():
-            self._ensure_synced(force_pull=True)
+            self._ensure_synced()
             tasks = self._read()
             yield tasks
+            inbound = self.last_inbound = (self._sync_calendar(tasks)
+                                           if self.calendar_on_write else '')
             self._write(tasks)
-            self._commit_and_push(message() if callable(message) else message)
-            self._mirror(tasks)
+            message = message() if callable(message) else message
+            self._commit_and_push(f"{message} (gcal: {inbound})" if inbound else message)
 
-    def _mirror(self, tasks):
-        """Mirror the pending set onto Google Calendar (see gcal.py). Runs
-        inside the write lock so two writers cannot race to create the same
-        event. Warns and returns on any failure; the write is already done."""
-        if self.calendar:
-            gcal.sync(tasks, self.calendar)
+    def _sync_calendar(self, tasks):
+        """Two-way reconcile with Google Calendar (see gcal.py), inside the
+        write lock. Returns a summary of inbound changes, '' if none, or None
+        if the sync was skipped (one stderr line says why). Never raises."""
+        if not self.calendar:
+            return ''
+        import gcal
+        n = gcal.sync(tasks, lambda desc, due: self._new_task(tasks, desc, due), self.calendar,
+                      cache_path=os.path.join(self._state_dir, 'lazy-calendar-id'))
+        if n is None:
+            return None
+        return ', '.join(f"{n[k]} {k}" for k in ('adopted', 'edited', 'done') if n[k])
+
+    def _new_task(self, tasks, description, due_iso):
+        """Append a task with the next free id. Ids in lines we could not
+        parse still count: minting one of those again would shadow it."""
+        seen = [t['id'] for t in tasks]
+        for raw in getattr(self, '_passthrough', []):
+            m = re.search(r'"id"\s*:\s*(\d+)', raw)
+            if m:
+                seen.append(int(m.group(1)))
+        task = {
+            'id': max(seen, default=0) + 1,
+            'description': description,
+            'due_date': due_iso,
+            'status': 'pending',
+            'created_at': _utcnow(),
+        }
+        tasks.append(task)
+        return task
 
     def get_tasks(self, mode):
         self._ensure_synced()
@@ -302,20 +359,8 @@ class Store:
 
     def add_task(self, description, due_date):
         with self._writing(f"add: {description}") as tasks:
-            seen = [t['id'] for t in tasks]
-            for raw in getattr(self, '_passthrough', []):
-                m = re.search(r'"id"\s*:\s*(\d+)', raw)
-                if m:
-                    seen.append(int(m.group(1)))
-            new_id = max(seen, default=0) + 1
-            tasks.append({
-                'id': new_id,
-                'description': description,
-                'due_date': _iso(due_date),
-                'status': 'pending',
-                'created_at': _utcnow(),
-            })
-        return new_id
+            task = self._new_task(tasks, description, _iso(due_date))
+        return task['id']
 
     def complete_task(self, task_id):
         with self._writing(f"done: {task_id}") as tasks:
@@ -366,20 +411,32 @@ class Store:
     # ---- sync utility ----
 
     def sync(self):
-        """Pull (rebasing if needed) + push. Used by `lazy sync`."""
+        """Pull (rebasing if needed) + push, then a calendar reconcile that
+        commits whatever came in from the calendar. Used by `lazy sync` and
+        the timer. Returns the inbound summary ('' if nothing came in), or
+        None if any leg failed, so the caller can exit non-zero and a timer
+        unit shows as failed instead of green."""
         if self.no_remote or not git_ops.has_remote(self.path):
             _warn("no remote configured; nothing to sync")
-            return
+            return None
         ok, err = git_ops.pull_rebase(self.path)
         if not ok:
             _warn(f"pull/rebase failed ({err})")
             _warn(f"  resolve in {self.path}/{TASKS_FILE} then run `lazy sync` again")
-            return
+            return None
         ok, err = git_ops.push(self.path)
         if not ok:
             _warn(f"push failed ({err})")
-            return
-        self._mirror(self._read())
+            return None
+        if not self.calendar:
+            return ''
+        with self._locked():           # the write cycle, with the reconcile forced on
+            self._ensure_synced()
+            tasks = self._read()
+            inbound = self.last_inbound = self._sync_calendar(tasks)
+            self._write(tasks)
+            self._commit_and_push(f"calendar sync (gcal: {inbound})" if inbound else 'calendar sync')
+        return self.last_inbound
 
 
 # ---- factory ----
@@ -428,11 +485,12 @@ def open_store():
         pull_freshness=cfg.get('pull_freshness_seconds', DEFAULT_FRESHNESS),
         no_remote=no_remote,
         calendar=calendar_service(cfg),
+        calendar_on_write=cfg.get('calendar_sync_on_write', True),
     )
 
 
 def calendar_service(cfg):
-    """Keyring service for the calendar mirror, or None when it is off."""
+    """Keyring service for the calendar sync, or None when it is off."""
     if not cfg.get('calendar_sync'):
         return None
-    return cfg.get('calendar_keyring_service') or gcal.DEFAULT_KEYRING_SERVICE
+    return cfg.get('calendar_keyring_service') or DEFAULT_KEYRING_SERVICE

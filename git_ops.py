@@ -60,14 +60,16 @@ def pull_rebase(path):
 
 
 def add_and_commit(path, filename, message):
+    """Returns (ok, err, committed). committed is False when the file was
+    already committed as-is, which is success with nothing to push."""
     ok, err = _run(['git', 'add', filename], cwd=path)
     if not ok:
-        return ok, err
-    # Empty diff = nothing to commit; treat as success.
+        return ok, err, False
     clean, _ = _run(['git', 'diff', '--cached', '--quiet'], cwd=path)
     if clean:
-        return True, ''
-    return _run(['git', 'commit', '-q', '-m', message], cwd=path)
+        return True, '', False
+    ok, err = _run(['git', 'commit', '-q', '-m', message], cwd=path)
+    return ok, err, ok
 
 
 def push(path):

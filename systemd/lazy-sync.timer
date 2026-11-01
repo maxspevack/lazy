@@ -1,0 +1,11 @@
+[Unit]
+Description=lazy: sync every 10 minutes
+
+[Timer]
+# Wall-clock schedule, so Persistent= applies: a run missed while the machine
+# was off happens right after the next login (user timers start at login).
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

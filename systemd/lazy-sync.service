@@ -1,0 +1,10 @@
+# lazy: pull/push the gist, then reconcile the Lazy Google Calendar both ways.
+# Install: mkdir -p ~/.config/systemd/user && cp systemd/lazy-sync.* ~/.config/systemd/user/
+#          systemctl --user daemon-reload && systemctl --user enable --now lazy-sync.timer
+# A failed leg exits 1, so `systemctl --user --failed` and `list-timers` tell the truth.
+[Unit]
+Description=lazy: sync the gist and the Lazy Google Calendar
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/lazy sync
